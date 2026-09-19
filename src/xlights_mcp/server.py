@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import tempfile
+import time
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -653,6 +655,44 @@ def fpp_stop() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _preload_audio_stack() -> None:
+    """Load every native library the analysis pipeline needs before the stdio loop starts.
+
+    On Windows, numpy/scipy's OpenBLAS DLL initializer takes a C-runtime lock that the
+    MCP stdin reader thread holds while blocked in read(). Importing those libraries
+    lazily inside a tool call therefore deadlocks the server. Running a tiny analysis
+    up front forces all DLL loads and numba JIT compilation onto the main thread while
+    it is still the only thread.
+    """
+    started = time.monotonic()
+    try:
+        import numpy as np
+        import soundfile as sf
+
+        from xlights_mcp.audio.beats import detect_beats
+        from xlights_mcp.audio.spectrum import analyze_spectrum
+        from xlights_mcp.audio.structure import detect_structure
+
+        try:
+            import demucs.separate  # noqa: F401
+            import torch  # noqa: F401
+        except ImportError:
+            pass
+
+        sr = 22050
+        t = np.arange(sr * 6) / sr
+        clicks = (np.sin(2 * np.pi * 440 * t) * (np.sin(2 * np.pi * 2 * t) > 0.95)).astype(np.float32)
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = Path(tmp) / "warmup.wav"
+            sf.write(wav, clicks, sr)
+            detect_beats(wav, sr=sr)
+            analyze_spectrum(wav, sr=sr)
+            detect_structure(wav, sr=sr)
+        logger.info(f"Audio stack preloaded in {time.monotonic() - started:.1f}s")
+    except Exception as e:
+        logger.warning(f"Audio stack preload failed (analysis may be slow or hang on Windows): {e}")
+
+
 def main():
     """Run the xLights MCP server."""
     logging.basicConfig(level=logging.INFO)
@@ -663,6 +703,7 @@ def main():
     logger.info(f"Active show: {config.active_show}")
     logger.info(f"Show path: {config.active_show_path}")
 
+    _preload_audio_stack()
     mcp.run()
 
 
