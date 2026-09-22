@@ -20,6 +20,11 @@ class StemPaths(BaseModel):
     bass: str = ""
     other: str = ""
     available: bool = False
+    # True when Demucs was importable but separation itself raised (CUDA OOM, a
+    # corrupt model download, a subprocess crash, ...). False + available=False
+    # means Demucs simply isn't installed -- a stable, cacheable outcome rather
+    # than a transient failure worth retrying.
+    failed: bool = False
 
 
 def separate_stems(
@@ -130,5 +135,6 @@ def separate_stems(
     except Exception as e:
         logger.error(f"Stem separation failed: {e}")
         stems.available = False
+        stems.failed = True
 
     return stems

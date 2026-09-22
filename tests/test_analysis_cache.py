@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from demucs_fixtures import install_fake_demucs
 
 from xlights_mcp.audio import analyzer
 from xlights_mcp.audio.analyzer import full_analysis
@@ -75,38 +76,71 @@ def test_force_bypasses_cache(click_track: Path, tmp_path: Path):
 def test_failed_stem_separation_is_not_cached(
     click_track: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    from xlights_mcp.audio import cache
+    """Demucs is importable but separation itself raises (e.g. CUDA OOM).
 
+    separate_stems' own try/except catches this and returns StemPaths(
+    available=False, failed=True) normally -- it never re-raises -- so this
+    drives the real failure point (a fake demucs.api.Separator that raises)
+    rather than monkeypatching separate_stems to raise, which the real code
+    never does.
+    """
+    from xlights_mcp.audio import cache
+    from xlights_mcp.audio.separator import separate_stems as real_separate_stems
+
+    # Restore the real separate_stems (the autouse fixture stubs it out) without
+    # touching the _madmom_grid stub -- beat detection stays hermetic/fast, only
+    # stem separation is driven for real here, via a fake demucs module.
+    monkeypatch.setattr(analyzer, "separate_stems", real_separate_stems)
     config = _config(tmp_path)
 
-    def boom(_path):
-        raise RuntimeError("demucs blew up")
+    def boom(_path: str):
+        raise RuntimeError("CUDA out of memory")
 
-    monkeypatch.setattr(analyzer, "separate_stems", boom)
+    install_fake_demucs(monkeypatch, separate=boom)
 
     analysis = full_analysis(click_track, config)
 
-    assert analysis.stem_analysis.available is False
+    assert analysis.stems.available is False
+    assert analysis.stems.failed is True
     assert not cache.cache_path(click_track, config.cache_dir).exists()
 
 
 def test_failed_stem_analysis_is_not_cached(
     click_track: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    """Separation succeeds but every stem's analysis fails (e.g. a disk read
+    error loading the separated wav files).
+
+    analyze_stems' own per-stem try/except swallows each failure and returns
+    StemAnalysis(available=False) normally -- it never re-raises -- so this
+    drives the real failure point (librosa.load raising for stem file paths)
+    rather than monkeypatching analyze_stems to raise, which the real code
+    never does.
+    """
+    import librosa
+
     from xlights_mcp.audio import cache
-    from xlights_mcp.audio.separator import StemPaths
+    from xlights_mcp.audio.separator import separate_stems as real_separate_stems
 
+    # Restore the real separate_stems (the autouse fixture stubs it out) without
+    # touching the _madmom_grid stub -- beat detection stays hermetic/fast, only
+    # stem separation/analysis is driven for real here.
+    monkeypatch.setattr(analyzer, "separate_stems", real_separate_stems)
     config = _config(tmp_path)
+    install_fake_demucs(monkeypatch)  # succeeds, writes small real stem wav files
 
-    monkeypatch.setattr(analyzer, "separate_stems", lambda _p: StemPaths(available=True))
+    real_load = librosa.load
 
-    def boom(_stems, sr):
-        raise RuntimeError("librosa blew up")
+    def load_or_fail_for_stems(path, *args, **kwargs):
+        if "stems" in str(path):
+            raise RuntimeError("disk read error")
+        return real_load(path, *args, **kwargs)
 
-    monkeypatch.setattr(analyzer, "analyze_stems", boom)
+    monkeypatch.setattr(librosa, "load", load_or_fail_for_stems)
 
     analysis = full_analysis(click_track, config)
 
+    assert analysis.stems.available is True
     assert analysis.stem_analysis.available is False
     assert not cache.cache_path(click_track, config.cache_dir).exists()
 

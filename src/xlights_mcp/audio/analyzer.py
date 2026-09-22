@@ -99,6 +99,16 @@ def full_analysis(
         logger.warning(f"Stem separation/analysis failed, continuing without stems: {e}")
         stem_pipeline_failed = True
 
+    if stems.failed:
+        # separate_stems itself caught a real separation failure (its own
+        # try/except returns normally rather than raising) -- degraded, not the
+        # stable "Demucs isn't installed" outcome, so don't cache it.
+        stem_pipeline_failed = True
+    elif stems.available and not stem_analysis.available:
+        # Separation succeeded but analyze_stems's per-stem try/except swallowed
+        # every stem's failure and also returned normally -- same deal.
+        stem_pipeline_failed = True
+
     drums = stem_analysis.stems.get("drums") if stem_analysis.available else None
     report(3, "Detecting beats and tempo")
     beats = detect_beats(audio_path, sr=sr, drums=drums)
