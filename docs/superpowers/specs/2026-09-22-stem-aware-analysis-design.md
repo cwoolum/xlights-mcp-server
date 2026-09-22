@@ -175,10 +175,10 @@ get_stem_events(mp3_path: str, stem: str, kind: str,
                 max_events: int = 500, resolution: str = "beat") -> dict
 ```
 
-- `stem` ∈ `drums | bass | vocals | other`; `kind` ∈ `onsets | energy | silences`; `resolution` ∈ `beat | bar` (used only by `energy`). Invalid values return `{"error": ...}` listing the valid ones.
+- `stem` ∈ `drums | bass | vocals | other`; `kind` ∈ `onsets | energy | silences`; `resolution` ∈ `beat | bar` (used only by `energy`). Invalid values return `{"error": ...}` listing the valid ones.  `max_events` must be ≥ 1 and `start_ms` ≤ `end_ms`; otherwise an error. Windowing and `next_start_ms` use integer milliseconds so paging never skips an item.
 - Window `[start_ms, end_ms)` defaults to the whole track.
 - `onsets` → `{"stem", "kind", "count", "events_ms": [int, ...]}`.
-- `energy` → `{"stem", "kind", "resolution", "points": [{"t_ms": int, "energy": float (3 dp)}]}`. `beat`: one mean value per beat span `[beat_i, beat_{i+1})` of the re-phased grid; `bar`: one per `[downbeat_i, downbeat_{i+1})`. The last span ends at track end. A span is included when its start is in the window.
+- `energy` → `{"stem", "kind", "resolution", "points": [{"t_ms": int, "energy": float (3 dp)}]}`. `beat`: one mean value per beat span `[beat_i, beat_{i+1})` of the re-phased grid; `bar`: one per `[downbeat_i, downbeat_{i+1})`. The last span ends at track end; if the grid starts after 0, a leading span [0, first grid point) is included (so intros are visible); an empty grid gives one span [0, duration). A span is included when its start is in the window.
 - `silences` → `{"stem", "kind", "spans_ms": [[start, end], ...]}`, clipped to the window.
 - Truncation (`onsets` events and `energy` points): if more than `max_events` fall in the window, return the first `max_events`, plus `"truncated": true` and `"next_start_ms"` (time of the first omitted item).
 - Served from the analysis cache; runs `full_analysis` (with progress) on a cache miss, the same way `get_beat_map` does.
