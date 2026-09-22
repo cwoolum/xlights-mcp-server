@@ -44,14 +44,19 @@ def test_drum_stem_reaches_beats_and_structure(
 def test_without_stems_beats_and_structure_get_none(
     click_track: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    seen = {}
+    seen: dict[str, object] = {}
+
+    def fake_beats(path, sr, drums=None):
+        seen["beats"] = drums
+        return BeatMap()
+
+    def fake_structure(path, sr, drums=None, beats=None):
+        seen["structure"] = drums
+        return []
+
     monkeypatch.setattr(analyzer, "separate_stems", lambda _p: StemPaths(available=False))
-    monkeypatch.setattr(
-        analyzer, "detect_beats", lambda path, sr, drums=None: seen.setdefault("beats", drums) or BeatMap()
-    )
-    monkeypatch.setattr(
-        analyzer, "detect_structure", lambda path, sr, drums=None, beats=None: seen.setdefault("structure", drums) or []
-    )
+    monkeypatch.setattr(analyzer, "detect_beats", fake_beats)
+    monkeypatch.setattr(analyzer, "detect_structure", fake_structure)
 
     full_analysis(click_track, AudioConfig(cache_dir=tmp_path / "cache"))
 
