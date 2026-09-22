@@ -158,6 +158,7 @@ def analyze_stems(stem_paths: StemPaths, sr: int = 22050) -> StemAnalysis:
                 onset_envelope=onset_env, sr=loaded_sr, backtrack=True
             )
             onset_times = librosa.frames_to_time(onset_frames, sr=loaded_sr).tolist()
+            onset_bass = _onset_bass_levels(y, loaded_sr, onset_times)
 
             # RMS energy curve
             rms = librosa.feature.rms(y=y)[0]
@@ -169,6 +170,7 @@ def analyze_stems(stem_paths: StemPaths, sr: int = 22050) -> StemAnalysis:
             results[name] = StemOnsets(
                 name=name,
                 onset_times=onset_times,
+                onset_bass=onset_bass,
                 energy=normalized_rms,
                 energy_times=rms_times,
                 mean_energy=mean_energy,
@@ -186,3 +188,29 @@ def analyze_stems(stem_paths: StemPaths, sr: int = 22050) -> StemAnalysis:
         return StemAnalysis(available=True, stems=results)
 
     return StemAnalysis(available=False)
+
+
+_KICK_BAND_HZ = 150
+_ONSET_BASS_WINDOW = (-0.02, 0.12)  # seconds around each onset to search for its peak
+
+
+def _onset_bass_levels(y: np.ndarray, sr: int, onset_times: list[float]) -> list[float]:
+    """Peak low-frequency (<150 Hz) level just after each onset, normalised 0-1 over the stem.
+
+    Used to tell a kick (strong low end) from a kickless pickup hit (hi-hat/snare,
+    little low end) at the same onset time.
+    """
+    stft = np.abs(librosa.stft(y, n_fft=2048, hop_length=512))
+    freqs = librosa.fft_frequencies(sr=sr, n_fft=2048)
+    low = stft[freqs < _KICK_BAND_HZ].sum(axis=0)
+    max_low = low.max() if low.size else 0.0
+    if max_low > 0:
+        low = low / max_low
+    frame_times = librosa.frames_to_time(np.arange(len(low)), sr=sr, hop_length=512)
+
+    before, after = _ONSET_BASS_WINDOW
+    levels = []
+    for onset in onset_times:
+        window = (frame_times >= onset + before) & (frame_times < onset + after)
+        levels.append(round(float(low[window].max()), 3) if np.any(window) else 0.0)
+    return levels

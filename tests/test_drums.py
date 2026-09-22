@@ -189,6 +189,61 @@ def test_merge_short_stops_leaves_structural_gaps_alone():
     assert [(r.start, r.end) for r in merged] == [(20.0, 59.5), (80.0, 119.5)]
 
 
+def test_pickup_fill_trims_the_run_to_the_first_kick():
+    # Run 2 opens with a 2-onset hi-hat/snare pickup (no kick) before the drop;
+    # the first kick lands on the third onset, one beat later.
+    n_run1 = len(np.arange(20, 60, 0.5))
+    n_run2 = len(np.arange(80, 120, 0.5))
+    onset_bass = [1.0] * n_run1 + [0.05, 0.05] + [1.0] * (n_run2 - 2)
+    stem = make_drum_stem([(20, 60), (80, 120)], duration=130, onset_bass=onset_bass)
+
+    runs = drum_runs(stem, beat_period=PERIOD, duration=130)
+
+    assert [(r.start, r.end) for r in runs] == [(20.0, 59.5), (81.0, 119.5)]
+
+    gaps = drum_gaps(runs, stem, duration=130, beat_period=PERIOD)
+    mid = gaps[1]
+    assert mid.kind == "mid"
+    assert mid.end == 81.0
+    assert mid.bars == pytest.approx((81.0 - 59.5) / 2.0)
+    assert anchor_starts(gaps) == [20.0, 81.0]
+
+
+def test_no_kick_in_first_bar_leaves_run_unchanged():
+    # Every onset in run 2's first bar is a non-kick hit: nothing to trim to.
+    n_run1 = len(np.arange(20, 60, 0.5))
+    n_run2 = len(np.arange(80, 120, 0.5))
+    onset_bass = [1.0] * n_run1 + [0.05, 0.05, 0.05, 0.05] + [1.0] * (n_run2 - 4)
+    stem = make_drum_stem([(20, 60), (80, 120)], duration=130, onset_bass=onset_bass)
+
+    runs = drum_runs(stem, beat_period=PERIOD, duration=130)
+
+    assert [(r.start, r.end) for r in runs] == [(20.0, 59.5), (80.0, 119.5)]
+
+
+def test_missing_onset_bass_leaves_run_unchanged():
+    # Old cached data has no onset_bass at all (length mismatch): trimming must
+    # be skipped rather than guessing.
+    stem = make_drum_stem([(20, 60), (80, 120)], duration=130)
+    stem.onset_bass = []
+
+    runs = drum_runs(stem, beat_period=PERIOD, duration=130)
+
+    assert [(r.start, r.end) for r in runs] == [(20.0, 59.5), (80.0, 119.5)]
+
+
+def test_pickup_trim_can_shorten_a_run_below_one_bar():
+    # Untrimmed, the stretch spans exactly one bar (2.0 s); trimming the leading
+    # pickup leaves only 0.2 s, so the run is discarded like any short run.
+    stem = StemOnsets(
+        name="drums", onset_times=[0.0, 1.9, 2.1], onset_bass=[0.05, 1.0, 1.0], silences=[]
+    )
+
+    runs = drum_runs(stem, beat_period=PERIOD, duration=5.0)
+
+    assert runs == []
+
+
 @pytest.mark.parametrize(
     ("onset_times", "silences", "duration", "expected_runs", "expected_mid_structural"),
     [

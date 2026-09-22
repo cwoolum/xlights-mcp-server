@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Bump when the analysis pipeline changes in a way that makes old results stale.
-ANALYSIS_VERSION = 2
+ANALYSIS_VERSION = 3
 
 
 def cache_key(audio_path: Path) -> str:

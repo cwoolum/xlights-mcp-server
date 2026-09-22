@@ -18,6 +18,8 @@ MIN_SILENCE_S = 1.0
 STRUCTURAL_GAP_S = 4.0
 DECAY_S = 1.0
 BEATS_PER_BAR = 4
+# Onset low-frequency level at/above this counts as a kick (see onset_bass on StemOnsets).
+KICK_THRESHOLD = 0.3
 # Backtracked onsets can land a few frames before the energy crosses the threshold.
 _EDGE_TOLERANCE_S = 0.1
 
@@ -60,8 +62,21 @@ class DrumGap(BaseModel):
 
 
 def drum_runs(drums: StemOnsets, *, beat_period: float, duration: float) -> list[DrumRun]:
-    """Stretches between drum silences that hold at least one bar of onsets."""
-    onsets = np.sort(np.asarray(drums.onset_times, dtype=float))
+    """Stretches between drum silences that hold at least one bar of onsets.
+
+    A run normally starts at its first onset. EDM drops are often cued in by a
+    kickless pickup fill (hi-hat/snare) a beat or two ahead of the downbeat, which
+    would otherwise anchor bar 1 too early. When onset_bass is available and the
+    stretch opens with such a pickup, the run is trimmed to start at the first
+    onset in its first bar that actually is a kick.
+    """
+    onset_times = np.asarray(drums.onset_times, dtype=float)
+    order = np.argsort(onset_times)
+    onsets = onset_times[order]
+    bass: np.ndarray | None = None
+    if len(drums.onset_bass) == len(drums.onset_times):
+        bass = np.asarray(drums.onset_bass, dtype=float)[order]
+
     stretches: list[tuple[float, float]] = []
     cursor = 0.0
     for start, end in sorted(drums.silences):
@@ -72,7 +87,16 @@ def drum_runs(drums: StemOnsets, *, beat_period: float, duration: float) -> list
     min_len = BEATS_PER_BAR * beat_period - 1e-6
     runs: list[DrumRun] = []
     for a, b in stretches:
-        inside = onsets[(onsets >= a - _EDGE_TOLERANCE_S) & (onsets < b + _EDGE_TOLERANCE_S)]
+        mask = (onsets >= a - _EDGE_TOLERANCE_S) & (onsets < b + _EDGE_TOLERANCE_S)
+        inside = onsets[mask]
+        if inside.size == 0:
+            continue
+        if bass is not None:
+            inside_bass = bass[mask]
+            first_bar = inside < inside[0] + BEATS_PER_BAR * beat_period
+            if inside_bass[0] < KICK_THRESHOLD and np.any(inside_bass[first_bar] >= KICK_THRESHOLD):
+                first_kick = int(np.argmax(inside_bass >= KICK_THRESHOLD))
+                inside = inside[first_kick:]
         if inside.size and inside[-1] - inside[0] >= min_len:
             runs.append(DrumRun(start=float(inside[0]), end=float(inside[-1])))
     return runs

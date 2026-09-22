@@ -11,6 +11,7 @@ class StemOnsets(BaseModel):
 
     name: str  # "drums", "bass", "other", "vocals"
     onset_times: list[float] = Field(default_factory=list)  # seconds
+    onset_bass: list[float] = Field(default_factory=list)  # low-freq (<150Hz) level 0-1, per onset
     energy: list[float] = Field(default_factory=list)  # normalized 0-1 per frame
     energy_times: list[float] = Field(default_factory=list)  # seconds
     mean_energy: float = 0.0

@@ -11,10 +11,20 @@ HOP = 512 / 22050
 
 
 def make_drum_stem(
-    runs: list[tuple[float, float]], duration: float, decay_s: float = 0.0, name: str = "drums"
+    runs: list[tuple[float, float]],
+    duration: float,
+    decay_s: float = 0.0,
+    name: str = "drums",
+    onset_bass: list[float] | None = None,
 ) -> StemOnsets:
     """Onsets every 0.5 s in each [start, end) run; energy 1.0 through each run,
-    then a linear decay over decay_s seconds after the run's last onset."""
+    then a linear decay over decay_s seconds after the run's last onset.
+
+    onset_bass is parallel to the generated onsets (in run order, each run
+    ascending). Defaults to 1.0 for every onset, i.e. every synthetic onset is a
+    kick, which keeps existing callers' pickup-free behaviour. Pass an explicit
+    list (e.g. with some onsets below KICK_THRESHOLD) to simulate a pickup fill.
+    """
     times = np.arange(0, duration, HOP)
     energy = np.zeros_like(times)
     onsets: list[float] = []
@@ -29,6 +39,7 @@ def make_drum_stem(
     return StemOnsets(
         name=name,
         onset_times=onsets,
+        onset_bass=onset_bass if onset_bass is not None else [1.0] * len(onsets),
         energy=energy.tolist(),
         energy_times=times.tolist(),
         mean_energy=float(energy.mean()),

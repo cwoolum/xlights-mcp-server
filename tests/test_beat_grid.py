@@ -195,6 +195,27 @@ def test_anchor_dropped_when_beyond_half_a_beat_period_keeps_base_downbeats(
     assert result.downbeat_times == [grid[i] for i in range(0, 20, 4)]
 
 
+def test_pickup_fill_before_a_drop_re_anchors_to_the_first_kick(
+    click_track: Path, monkeypatch
+):
+    grid = np.arange(0, 40, 0.5).tolist()  # 80 beats
+    monkeypatch.setattr(beats_module, "_madmom_grid", lambda _p: (grid, list(range(0, 80, 4))))
+    monkeypatch.setattr(beats_module.librosa, "get_duration", lambda **_k: 40.0)
+    # Run 2's raw start (20.5, beat 41) is a 2-onset hi-hat/snare pickup with no
+    # kick; the first kick lands one beat later at 21.5 (beat 43). Bar 1 must
+    # re-anchor to the kick, not the pickup.
+    n_run1 = len(np.arange(0, 10, 0.5))
+    n_run2 = len(np.arange(20.5, 40, 0.5))
+    onset_bass = [1.0] * n_run1 + [0.05, 0.05] + [1.0] * (n_run2 - 2)
+    drums = make_drum_stem([(0, 10), (20.5, 40)], duration=40.0, onset_bass=onset_bass)
+
+    result = detect_beats(click_track, drums=drums)
+
+    # anchor at 21.5 (beat 43, 43 % 4 == 3) rather than the raw pickup start at
+    # 20.5 (beat 41, 41 % 4 == 1).
+    assert result.downbeat_times == [grid[i] for i in range(3, 80, 4)]
+
+
 def test_detect_beats_leading_gap_with_two_anchors_reanchors_whole_song(
     click_track: Path, monkeypatch
 ):
