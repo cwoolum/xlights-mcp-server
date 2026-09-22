@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -59,8 +61,19 @@ def load_cached(audio_path: Path, cache_dir: Path) -> SongAnalysis | None:
 
 
 def save_cached(analysis: SongAnalysis, audio_path: Path, cache_dir: Path) -> Path:
-    """Persist an analysis result. Returns the cache file path."""
+    """Persist an analysis result. Returns the cache file path.
+
+    Written atomically (temp file + os.replace) so a reader never observes a
+    partially written file, and a failed write can't corrupt an existing entry.
+    """
     path = cache_path(audio_path, cache_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(analysis.model_dump_json())
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(analysis.model_dump_json())
+        os.replace(tmp_name, path)
+    except BaseException:
+        os.remove(tmp_name)
+        raise
     return path

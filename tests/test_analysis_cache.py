@@ -138,3 +138,43 @@ def test_cache_ignores_entries_written_by_the_previous_version(
     monkeypatch.undo()
 
     assert cache.load_cached(click_track, cache_dir) is None
+
+
+def test_save_cached_writes_atomically_leaving_no_temp_file(
+    click_track: Path, tmp_path: Path
+):
+    from xlights_mcp.audio import cache
+    from xlights_mcp.audio.analyzer import SongAnalysis
+
+    cache_dir = tmp_path / "cache"
+    analysis = SongAnalysis(file_path=str(click_track), file_name="click.wav")
+
+    path = cache.save_cached(analysis, click_track, cache_dir)
+
+    assert path.exists()
+    assert list(path.parent.iterdir()) == [path]
+
+
+def test_save_cached_leaves_existing_entry_untouched_when_write_fails(
+    click_track: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from xlights_mcp.audio import cache
+    from xlights_mcp.audio.analyzer import SongAnalysis
+
+    cache_dir = tmp_path / "cache"
+    first = SongAnalysis(file_path=str(click_track), file_name="click.wav", duration_seconds=1.0)
+    path = cache.save_cached(first, click_track, cache_dir)
+    original_bytes = path.read_bytes()
+
+    second = SongAnalysis(file_path=str(click_track), file_name="click.wav", duration_seconds=2.0)
+
+    def boom(self) -> str:
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(SongAnalysis, "model_dump_json", boom)
+
+    with pytest.raises(RuntimeError, match="disk full"):
+        cache.save_cached(second, click_track, cache_dir)
+
+    assert path.read_bytes() == original_bytes
+    assert list(path.parent.iterdir()) == [path]
