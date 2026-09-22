@@ -144,9 +144,9 @@ So a pop song with a drumless intro or a one-bar drum stop keeps pop labels; a t
    |---|---|---|---|
    | 1 | Inside the leading structural gap | `intro` | `absent` |
    | 2 | Inside the trailing structural gap | `outro` | `absent` or `decaying` |
-   | 3 | Inside a mid-song structural gap of ≤ 8 bars | `build` | `absent` or `decaying` |
-   | 4 | Inside a mid-song structural gap of > 8 bars, before or with no novelty boundary inside the gap | `breakdown` | `absent` or `decaying` |
-   | 5 | Inside a mid-song structural gap of > 8 bars, after the **last** novelty boundary inside the gap | `build` | `absent` |
+   | 3 | Inside a mid-song structural gap of ≤ 8.5 bars (an 8-bar riser measured last hit → first kick runs a little over) | `build` | `absent` or `decaying` |
+   | 4 | Inside a mid-song structural gap of > 8.5 bars, before or with no novelty boundary inside the gap | `breakdown` | `absent` or `decaying` |
+   | 5 | Inside a mid-song structural gap of > 8.5 bars, after the **last** novelty boundary inside the gap | `build` | `absent` |
    | 6 | Starts at an anchor run's start | `drop` | `present` |
    | 7 | First section of the track, drums present (no leading structural gap) | `intro` | `present` |
    | 8 | Any other drums-present section | label of the most recent drums-present section (never a gap label); `drop` if there is none | `present` |
