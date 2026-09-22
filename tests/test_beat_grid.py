@@ -99,6 +99,7 @@ def _install_fake_madmom(
 
 
 def test_madmom_grid_returns_beats_and_bar_one_indices(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.undo()  # restore the real _madmom_grid; this test exercises it directly
     calls: list[dict] = []
     _install_fake_madmom(
         monkeypatch,
@@ -113,18 +114,21 @@ def test_madmom_grid_returns_beats_and_bar_one_indices(monkeypatch: pytest.Monke
 
 
 def test_madmom_grid_returns_none_when_rnn_processor_fails(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.undo()  # restore the real _madmom_grid; this test exercises it directly
     _install_fake_madmom(monkeypatch, rnn_error=RuntimeError("boom"))
 
     assert beats_module._madmom_grid(Path("song.wav")) is None
 
 
 def test_madmom_grid_returns_none_when_dbn_result_is_empty(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.undo()  # restore the real _madmom_grid; this test exercises it directly
     _install_fake_madmom(monkeypatch, dbn_result=np.empty((0, 2)))
 
     assert beats_module._madmom_grid(Path("song.wav")) is None
 
 
 def test_madmom_grid_returns_none_when_madmom_is_not_importable(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.undo()  # restore the real _madmom_grid; this test exercises it directly
     monkeypatch.setitem(sys.modules, "madmom.features.downbeats", None)
 
     assert beats_module._madmom_grid(Path("song.wav")) is None

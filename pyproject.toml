@@ -59,3 +59,7 @@ line-length = 100
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-m 'not real_backends'"
+markers = [
+    "real_backends: exercises the real demucs/madmom backends (slow, requires them installed); run with -m real_backends",
+]
