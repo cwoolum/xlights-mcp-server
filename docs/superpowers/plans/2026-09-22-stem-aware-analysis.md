@@ -126,7 +126,7 @@ class StemAnalysis(BaseModel):
         """Return the stem name with highest mean energy in a time range."""
         best_name = "other"
         best_energy = 0.0
-        for name, stem in self.stems.items():
+        for name in self.stems:
             e = self.get_mean_energy_in_range(name, start, end)
             if e > best_energy:
                 best_energy = e
@@ -134,7 +134,7 @@ class StemAnalysis(BaseModel):
         return best_name
 ```
 
-This is the existing `StemAnalysis` verbatim; only `StemOnsets.silences` is new.
+This is the existing `StemAnalysis` except `dominant_stem` iterates `self.stems` keys (the value was unused — ruff PERF102); only `StemOnsets.silences` is new.
 
 - [ ] **Step 2: In analyzer.py**, delete both class definitions and add to the imports:
 
