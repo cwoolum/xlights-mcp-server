@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 import librosa
@@ -10,9 +11,10 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from xlights_mcp.audio.beats import BeatMap, detect_beats
+from xlights_mcp.audio.cache import load_cached, save_cached
+from xlights_mcp.audio.separator import StemPaths, separate_stems
 from xlights_mcp.audio.spectrum import SpectrumAnalysis, analyze_spectrum
 from xlights_mcp.audio.structure import SongSection, detect_structure
-from xlights_mcp.audio.separator import StemPaths, separate_stems
 from xlights_mcp.config import AudioConfig
 
 logger = logging.getLogger(__name__)
@@ -71,34 +73,62 @@ class SongAnalysis(BaseModel):
     sections: list[SongSection] = Field(default_factory=list)
     stems: StemPaths = Field(default_factory=StemPaths)
     stem_analysis: StemAnalysis = Field(default_factory=StemAnalysis)
+    cached: bool = False  # True when served from the on-disk analysis cache
 
     @property
     def duration_ms(self) -> int:
         return int(self.duration_seconds * 1000)
 
 
+ProgressCallback = Callable[[int, int, str], None]
+"""Called as (completed_stages, total_stages, message) at each stage boundary."""
+
+_STAGE_COUNT = 5
+
+
 def full_analysis(
     audio_path: Path,
     audio_config: AudioConfig | None = None,
     include_stems: bool = False,
+    progress: ProgressCallback | None = None,
+    force: bool = False,
 ) -> SongAnalysis:
     """Run the complete audio analysis pipeline.
+
+    Results are cached on disk (keyed by file content); a cache hit returns
+    immediately with ``cached=True``.
 
     Args:
         audio_path: Path to the audio file (.mp3, .wav, etc.)
         audio_config: Audio configuration settings
         include_stems: Whether to run Demucs source separation
+        progress: Optional callback invoked at each stage boundary
+        force: Re-run analysis even if a cached result exists
     """
     if audio_config is None:
         audio_config = AudioConfig()
 
+    def report(done: int, message: str) -> None:
+        logger.info(f"[{done}/{_STAGE_COUNT}] {message}")
+        if progress:
+            progress(done, _STAGE_COUNT, message)
+
+    if not force:
+        cached = load_cached(audio_path, audio_config.cache_dir)
+        if cached is not None:
+            report(_STAGE_COUNT, "Loaded cached analysis")
+            return cached
+
     sr = audio_config.sample_rate
     logger.info(f"Starting full analysis: {audio_path}")
 
-    # Run all analyses
+    report(0, "Detecting beats and tempo")
     beats = detect_beats(audio_path, sr=sr)
+    report(1, "Analyzing spectrum and energy")
     spectrum = analyze_spectrum(audio_path, sr=sr)
+    report(2, "Detecting song structure")
     sections = detect_structure(audio_path, sr=sr)
+    report(3, "Separating stems")
 
     # Always try stem separation (results are cached)
     stems = StemPaths()
@@ -106,6 +136,7 @@ def full_analysis(
     try:
         stems = separate_stems(audio_path)
         if stems.available:
+            report(4, "Analyzing stems")
             stem_analysis = analyze_stems(stems, sr=sr)
     except Exception as e:
         logger.info(f"Stem analysis unavailable: {e}")
@@ -129,6 +160,8 @@ def full_analysis(
         f"stems={'yes' if stem_analysis.available else 'no'}"
     )
 
+    save_cached(analysis, audio_path, audio_config.cache_dir)
+    report(_STAGE_COUNT, "Analysis complete")
     return analysis
 
 
