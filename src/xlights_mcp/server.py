@@ -320,13 +320,15 @@ async def analyze_song(mp3_path: str, ctx: Context, force: bool = False) -> dict
 
     Results are cached on disk keyed by file content, so repeat calls (and
     create_sequence on the same file) return instantly. Returns a compact
-    summary; use get_beat_map / get_energy_profile / get_song_structure for
-    the full per-frame data.
+    summary; use get_beat_map / get_energy_profile / get_song_structure / get_stem_events for
+    detailed data.
 
     Args:
         mp3_path: Path to the audio file to analyze (.mp3, .wav, .ogg, ...)
         force: Re-run analysis even if a cached result exists
     """
+    from xlights_mcp.audio.stem_events import stems_summary
+
     path = Path(mp3_path).expanduser()
     if not path.exists():
         return {"error": f"File not found: {path}"}
@@ -341,10 +343,13 @@ async def analyze_song(mp3_path: str, ctx: Context, force: bool = False) -> dict
         "tempo_bpm": round(analysis.beats.tempo, 1),
         "beat_count": len(analysis.beats.beat_times),
         "onset_count": len(analysis.beats.onset_times),
+        "beat_source": analysis.beats.beat_source,
+        "drum_aligned": analysis.beats.drum_aligned,
+        "structure_source": analysis.sections[0].structure_source if analysis.sections else "mixdown",
         "sections": [s.model_dump() for s in analysis.sections],
         "peak_loudness_time": round(analysis.spectrum.peak_loudness_time, 2),
         "dynamic_range": round(analysis.spectrum.dynamic_range, 2),
-        "stems_available": analysis.stem_analysis.available,
+        "stems": stems_summary(analysis),
         "cached": analysis.cached,
         "elapsed_seconds": round(elapsed, 1),
     }
@@ -400,6 +405,48 @@ async def get_energy_profile(mp3_path: str, ctx: Context) -> dict:
 
     analysis = await _analyze_in_thread(path, ctx)
     return analysis.spectrum.model_dump()
+
+
+@mcp.tool()
+async def get_stem_events(
+    mp3_path: str,
+    ctx: Context,
+    stem: str,
+    kind: str,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+    max_events: int = 500,
+    resolution: str = "beat",
+) -> dict:
+    """Get per-stem events from source separation (drums, bass, vocals, other).
+
+    kind="onsets": hit times in ms (e.g. drum hits, vocal phrase starts).
+    kind="energy": stem loudness, one value per beat (resolution="beat") or bar ("bar").
+    kind="silences": [start, end] ms spans where the stem is silent (drops, breakdowns, risers).
+    Results are windowed by start_ms/end_ms and capped at max_events; when truncated, the
+    response has truncated=true and next_start_ms to continue from.
+    Served from the analysis cache when available (see analyze_song).
+
+    Args:
+        mp3_path: Path to the audio file
+        stem: drums | bass | vocals | other
+        kind: onsets | energy | silences
+        start_ms: Window start (default: track start)
+        end_ms: Window end, exclusive (default: track end)
+        max_events: Maximum events or points to return
+        resolution: beat | bar (energy only)
+    """
+    from xlights_mcp.audio.stem_events import stem_events, validate_stem_query
+
+    error = validate_stem_query(stem, kind, resolution, max_events=max_events)
+    if error:
+        return {"error": error}
+    path = Path(mp3_path).expanduser()
+    if not path.exists():
+        return {"error": f"File not found: {path}"}
+
+    analysis = await _analyze_in_thread(path, ctx)
+    return stem_events(analysis, stem, kind, start_ms, end_ms, max_events, resolution)
 
 
 # ---------------------------------------------------------------------------
@@ -722,6 +769,11 @@ def _preload_audio_stack() -> None:
         from xlights_mcp.audio.beats import detect_beats
         from xlights_mcp.audio.spectrum import analyze_spectrum
         from xlights_mcp.audio.structure import detect_structure
+
+        try:
+            import madmom.features.downbeats  # noqa: F401
+        except ImportError:
+            pass
 
         try:
             import demucs.separate  # noqa: F401

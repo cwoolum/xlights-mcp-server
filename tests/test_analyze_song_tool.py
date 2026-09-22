@@ -5,10 +5,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
+from drum_fixtures import make_drum_stem
 from mcp.shared.memory import create_connected_server_and_client_session
 
 from xlights_mcp import server as server_module
+from xlights_mcp.audio.analyzer import SongAnalysis, StemAnalysis
+from xlights_mcp.audio.beats import BeatMap
+from xlights_mcp.audio.cache import save_cached
+from xlights_mcp.audio.sections import SongSection
 from xlights_mcp.config import AudioConfig, ServerConfig
 
 
@@ -131,3 +137,90 @@ async def test_preview_plan_streams_progress(
 
     assert "error" not in payload
     assert any("beat" in (m or "").lower() for _, _, m in progress)
+
+
+def _cache_fake_analysis(path: Path, config: ServerConfig, with_stems: bool = True) -> None:
+    analysis = SongAnalysis(
+        file_path=str(path),
+        file_name=path.name,
+        duration_seconds=20.0,
+        beats=BeatMap(
+            tempo=120.0,
+            beat_times=np.arange(0, 20, 0.5).tolist(),
+            downbeat_times=np.arange(0, 20, 2.0).tolist(),
+            beat_source="madmom",
+            drum_aligned=with_stems,
+        ),
+        sections=[
+            SongSection(label="drop", start_time=0.0, end_time=20.0, structure_source="stems", drums="present")
+        ],
+        stem_analysis=StemAnalysis(
+            available=with_stems,
+            stems={"drums": make_drum_stem([(0, 8), (12, 20)], duration=20.0)} if with_stems else {},
+        ),
+    )
+    save_cached(analysis, path, config.audio.cache_dir)
+
+
+async def test_analyze_song_reports_stem_summary_and_provenance(
+    click_track: Path, isolated_config: ServerConfig
+):
+    _cache_fake_analysis(click_track, isolated_config)
+
+    payload, _ = await _call_analyze(click_track)
+
+    assert payload["beat_source"] == "madmom"
+    assert payload["drum_aligned"] is True
+    assert payload["structure_source"] == "stems"
+    assert payload["stems"]["drums"]["onsets"] == 32
+    assert payload["sections"][0]["drums"] == "present"
+
+
+async def test_analyze_song_stems_null_without_separation(
+    click_track: Path, isolated_config: ServerConfig
+):
+    _cache_fake_analysis(click_track, isolated_config, with_stems=False)
+
+    payload, _ = await _call_analyze(click_track)
+
+    assert payload["stems"] is None
+
+
+async def test_get_stem_events_serves_windowed_onsets(click_track: Path, isolated_config: ServerConfig):
+    _cache_fake_analysis(click_track, isolated_config)
+
+    payload, _ = await _call(
+        "get_stem_events",
+        {"mp3_path": str(click_track), "stem": "drums", "kind": "onsets", "start_ms": 1000, "end_ms": 3000},
+    )
+
+    assert payload["events_ms"] == [1000, 1500, 2000, 2500]
+
+
+async def test_get_stem_events_rejects_bad_kind_before_analysing(
+    click_track: Path, isolated_config: ServerConfig, monkeypatch
+):
+    def boom(*_a, **_k):
+        raise AssertionError("analysed despite invalid arguments")
+
+    monkeypatch.setattr(server_module, "_analyze_in_thread", boom)
+
+    payload, _ = await _call("get_stem_events", {"mp3_path": str(click_track), "stem": "drums", "kind": "hits"})
+
+    assert "onsets" in payload["error"]
+
+
+async def test_get_stem_events_rejects_bad_max_events_before_analysing(
+    click_track: Path, isolated_config: ServerConfig, monkeypatch
+):
+    def boom(*_a, **_k):
+        raise AssertionError("analysed despite invalid arguments")
+
+    monkeypatch.setattr(server_module, "_analyze_in_thread", boom)
+
+    payload, _ = await _call(
+        "get_stem_events",
+        {"mp3_path": str(click_track), "stem": "drums", "kind": "onsets", "max_events": 0},
+    )
+
+    assert "max_events" in payload["error"]
