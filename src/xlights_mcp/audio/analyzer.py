@@ -166,7 +166,9 @@ def analyze_stems(stem_paths: StemPaths, sr: int = 22050) -> StemAnalysis:
                 onset_envelope=onset_env, sr=loaded_sr, backtrack=True
             )
             onset_times = librosa.frames_to_time(onset_frames, sr=loaded_sr).tolist()
-            onset_bass = _onset_bass_levels(y, loaded_sr, onset_times)
+            # Only the drums stem needs kick/pickup discrimination (see drums.py);
+            # skip the extra STFT for the other three stems.
+            onset_bass = _onset_bass_levels(y, loaded_sr, onset_times) if name == "drums" else []
 
             # RMS energy curve
             rms = librosa.feature.rms(y=y)[0]

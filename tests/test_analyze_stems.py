@@ -60,6 +60,22 @@ def _mixed_bass_and_click_stem(path: Path) -> None:
     sf.write(path, y, sr)
 
 
+def test_analyze_stems_onset_bass_is_empty_for_non_drum_stems(tmp_path: Path):
+    # Kick/pickup discrimination only matters for drums (see drums.py); computing
+    # onset_bass for the other three stems would just be wasted STFTs.
+    vocals_path = tmp_path / "vocals.wav"
+    drums_path = tmp_path / "drums.wav"
+    _clicky_drum_stem(vocals_path)
+    _clicky_drum_stem(drums_path)
+
+    stems = StemPaths(available=True, vocals=str(vocals_path), drums=str(drums_path))
+    result = analyze_stems(stems, sr=22050)
+
+    assert result.stems["vocals"].onset_times  # sanity: onsets were still detected
+    assert result.stems["vocals"].onset_bass == []
+    assert len(result.stems["drums"].onset_bass) == len(result.stems["drums"].onset_times)
+
+
 def test_analyze_stems_onset_bass_separates_kicks_from_high_clicks(tmp_path: Path):
     drum_path = tmp_path / "drums.wav"
     _mixed_bass_and_click_stem(drum_path)
