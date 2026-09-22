@@ -48,7 +48,7 @@ Give it an `.mp3`, and it will analyze the beats, song structure, and energy —
 
 - **Python 3.11+**
 - **[uv](https://docs.astral.sh/uv/)** (recommended) or pip
-- **ffmpeg** — for audio format handling (`brew install ffmpeg` on macOS, `apt install ffmpeg` on Linux)
+- **ffmpeg** — for audio format handling (`brew install ffmpeg` on macOS, `apt install ffmpeg` on Linux); also required by madmom (the `beats` extra) to decode mp3. Note: librosa 1.0 dropped m4a support — convert `.m4a` files to `.mp3` or `.wav` before analyzing.
 - **xLights** — installed with at least one show folder configured
 
 ---
@@ -78,11 +78,12 @@ uv pip install -e ".[separation]"
 # Lyrics/singing faces — transcribes vocals for lip-sync animation
 uv pip install -e ".[lyrics]"
 
-# Better beat detection (madmom, built from source — needs a C compiler;
-# on Windows install "Desktop development with C++" from the VS Build Tools)
+# Better beat detection (madmom, installed from a git commit and built from
+# source — needs git and a C compiler; on Windows install git and
+# "Desktop development with C++" from the VS Build Tools)
 uv pip install -e ".[beats]"
 
-# Everything
+# Everything (also needs git + a C compiler on Windows, for the beats extra above)
 uv pip install -e ".[all]"
 ```
 
@@ -280,10 +281,11 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 ### Audio Analysis
 | Tool | Description |
 |------|-------------|
-| `analyze_song` | Full audio analysis: beats, structure, spectrum, energy |
-| `get_song_structure` | Detect verse/chorus/bridge/intro/outro sections |
-| `get_beat_map` | Get beat timestamps, downbeats, tempo, and onsets |
+| `analyze_song` | Full audio analysis: beats, structure, spectrum, energy — includes a `stems` summary (per-stem onset/energy counts) when source separation is installed |
+| `get_song_structure` | Detect song sections — verse/chorus/bridge, or intro/build/drop/breakdown/outro for tracks with a structural drum gap; sections carry `drums` (present/absent/decaying) when a drum stem was analyzed |
+| `get_beat_map` | Get beat timestamps, downbeats, tempo, and onsets — includes `beat_source` (madmom/librosa) and `drum_aligned` |
 | `get_energy_profile` | Get loudness curve and bass/mid/high frequency band energy |
+| `get_stem_events` | Per-stem onsets, energy (per beat or bar), or silences from source separation, windowed and paged |
 
 ### Sequence Generation
 | Tool | Description |
@@ -374,6 +376,20 @@ xlights-mcp-server/
 │       ├── upload.py          # Sequence upload to FPP
 │       └── schedule.py        # Schedule management
 └── tests/
+```
+
+---
+
+## Development
+
+Tests run hermetically by default (separation and beat-tracking backends are stubbed), so `pytest` needs none of the optional extras installed. To also exercise the real Demucs/madmom backends (needs the `separation` and `beats` extras installed):
+
+```bash
+# Windows
+.venv/Scripts/python -m pytest -m real_backends
+
+# macOS/Linux
+.venv/bin/python -m pytest -m real_backends
 ```
 
 ---
