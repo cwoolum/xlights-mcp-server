@@ -124,7 +124,7 @@ So a pop song with a drumless intro or a one-bar drum stop keeps pop labels; a t
 
 ### EDM labelling
 
-1. **Boundaries.** Candidates are every run start and run end adjacent to a structural gap, plus the existing novelty/energy boundaries. A novelty boundary within 2 s of a drum boundary is dropped in favour of the drum boundary. Every boundary snaps to the nearest downbeat. A section shorter than 3.5 beats (a partial bar; snapped downbeat spacing jitters around one bar) merges into its predecessor; if it is the first section, into its successor. Anchor boundaries (drop starts) are never removed: a short section starting at an anchor merges forward instead.
+1. **Boundaries.** Candidates are every run start and run end adjacent to a structural gap, plus the existing novelty/energy boundaries. A novelty boundary within 2 s of a drum boundary is dropped in favour of the drum boundary. Every boundary snaps to the nearest downbeat within half a bar; a boundary with no downbeat that close (the grid has a hole) keeps its raw time. A section shorter than 3.5 beats (a partial bar; snapped downbeat spacing jitters around one bar) merges into its predecessor; if it is the first section, into its successor. Anchor boundaries (drop starts) are never removed: a short section starting at an anchor merges forward instead, and is left short if its end is also an anchor or the track end.
 2. **Labels.** Each section gets exactly one label, by the first matching row:
 
    | # | Section | Label | `drums` |
