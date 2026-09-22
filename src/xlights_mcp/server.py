@@ -323,6 +323,15 @@ async def analyze_song(mp3_path: str, ctx: Context, force: bool = False) -> dict
     summary; use get_beat_map / get_energy_profile / get_song_structure / get_stem_events for
     detailed data.
 
+    Returns (in addition to the fields below): stems is a per-stem summary
+    {onsets, mean_energy, silences_ms} keyed by "drums"/"bass"/"vocals"/"other", or
+    null when source separation is unavailable — in that case get_stem_events will
+    also return an error. sections[].drums is "present"/"absent"/"decaying", or null
+    when that section's structure came from the mixdown only (no drum stem).
+    beat_source ("madmom"/"librosa") and drum_aligned say whether the beat grid used
+    the drum-aware pipeline; structure_source ("stems"/"mixdown") says the same for
+    the song sections.
+
     Args:
         mp3_path: Path to the audio file to analyze (.mp3, .wav, .ogg, ...)
         force: Re-run analysis even if a cached result exists
@@ -420,11 +429,29 @@ async def get_stem_events(
 ) -> dict:
     """Get per-stem events from source separation (drums, bass, vocals, other).
 
-    kind="onsets": hit times in ms (e.g. drum hits, vocal phrase starts).
-    kind="energy": stem loudness, one value per beat (resolution="beat") or bar ("bar").
-    kind="silences": [start, end] ms spans where the stem is silent (drops, breakdowns, risers).
-    Results are windowed by start_ms/end_ms and capped at max_events; when truncated, the
-    response has truncated=true and next_start_ms to continue from.
+    Requires source separation to have run for this file: if analyze_song returned
+    "stems": null, this returns {"error": ...} rather than analysing.
+
+    kind="onsets": hit times in the window, e.g. drum hits or vocal phrase starts.
+    Returns {"count", "events_ms": [int, ...]}; count is the total number of onsets
+    in the window before any truncation.
+
+    kind="energy": stem loudness over the window, one point per beat (resolution=
+    "beat") or bar ("bar") span that starts inside the window (plus a leading point
+    for [0, first_grid_time) when the beat/bar grid starts after the window's own
+    start). Returns {"resolution", "points": [{"t_ms", "energy"}, ...]}; energy is
+    0-1, rounded to 3 decimal places.
+
+    kind="silences": [start, end] ms spans where the stem is silent, clipped to the
+    window. Returns {"spans_ms": [[start, end], ...]} and is never truncated. For
+    drums, a silence marks a breakdown, riser, or other gap; the span's END is where
+    the drums come back in (e.g. a drop).
+
+    onsets and energy return at most max_events items; when the response has
+    truncated=true, call again with start_ms=next_start_ms to continue. An invalid
+    stem, kind, resolution, max_events, or window (start_ms > end_ms) returns
+    {"error": ...} without analysing.
+
     Served from the analysis cache when available (see analyze_song).
 
     Args:
@@ -438,7 +465,9 @@ async def get_stem_events(
     """
     from xlights_mcp.audio.stem_events import stem_events, validate_stem_query
 
-    error = validate_stem_query(stem, kind, resolution, max_events=max_events)
+    error = validate_stem_query(
+        stem, kind, resolution, max_events=max_events, start_ms=start_ms, end_ms=end_ms
+    )
     if error:
         return {"error": error}
     path = Path(mp3_path).expanduser()
@@ -772,8 +801,8 @@ def _preload_audio_stack() -> None:
 
         try:
             import madmom.features.downbeats  # noqa: F401
-        except ImportError:
-            pass
+        except Exception as e:  # noqa: BLE001 - a broken madmom install must not abort warm-up
+            logger.debug(f"madmom unavailable, skipping preload: {e}")
 
         try:
             import demucs.separate  # noqa: F401

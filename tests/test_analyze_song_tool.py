@@ -89,6 +89,9 @@ async def _call(name: str, args: dict):
 
     async with create_connected_server_and_client_session(server_module.mcp) as client:
         result = await client.call_tool(name, args, progress_callback=on_progress)
+    if result.isError:
+        text = result.content[0].text if result.content else "<no content>"
+        raise AssertionError(f"tool {name!r} returned an error result: {text}")
     return json.loads(result.content[0].text), progress
 
 
@@ -140,6 +143,11 @@ async def test_preview_plan_streams_progress(
 
 
 def _cache_fake_analysis(path: Path, config: ServerConfig, with_stems: bool = True) -> None:
+    section = (
+        SongSection(label="drop", start_time=0.0, end_time=20.0, structure_source="stems", drums="present")
+        if with_stems
+        else SongSection(label="drop", start_time=0.0, end_time=20.0, structure_source="mixdown", drums=None)
+    )
     analysis = SongAnalysis(
         file_path=str(path),
         file_name=path.name,
@@ -151,9 +159,7 @@ def _cache_fake_analysis(path: Path, config: ServerConfig, with_stems: bool = Tr
             beat_source="madmom",
             drum_aligned=with_stems,
         ),
-        sections=[
-            SongSection(label="drop", start_time=0.0, end_time=20.0, structure_source="stems", drums="present")
-        ],
+        sections=[section],
         stem_analysis=StemAnalysis(
             available=with_stems,
             stems={"drums": make_drum_stem([(0, 8), (12, 20)], duration=20.0)} if with_stems else {},
@@ -174,6 +180,9 @@ async def test_analyze_song_reports_stem_summary_and_provenance(
     assert payload["structure_source"] == "stems"
     assert payload["stems"]["drums"]["onsets"] == 32
     assert payload["sections"][0]["drums"] == "present"
+    silences_ms = payload["stems"]["drums"]["silences_ms"]
+    assert silences_ms == [[7755, 12005]]
+    assert all(isinstance(v, int) for span in silences_ms for v in span)
 
 
 async def test_analyze_song_stems_null_without_separation(
@@ -184,6 +193,29 @@ async def test_analyze_song_stems_null_without_separation(
     payload, _ = await _call_analyze(click_track)
 
     assert payload["stems"] is None
+    assert payload["structure_source"] == "mixdown"
+    assert payload["sections"][0]["drums"] is None
+
+
+async def test_analyze_song_structure_source_defaults_to_mixdown_without_sections(
+    click_track: Path, isolated_config: ServerConfig
+):
+    analysis = SongAnalysis(
+        file_path=str(click_track),
+        file_name=click_track.name,
+        duration_seconds=20.0,
+        beats=BeatMap(
+            tempo=120.0,
+            beat_times=np.arange(0, 20, 0.5).tolist(),
+            downbeat_times=np.arange(0, 20, 2.0).tolist(),
+        ),
+        sections=[],
+    )
+    save_cached(analysis, click_track, isolated_config.audio.cache_dir)
+
+    payload, _ = await _call_analyze(click_track)
+
+    assert payload["structure_source"] == "mixdown"
 
 
 async def test_get_stem_events_serves_windowed_onsets(click_track: Path, isolated_config: ServerConfig):
@@ -224,3 +256,40 @@ async def test_get_stem_events_rejects_bad_max_events_before_analysing(
     )
 
     assert "max_events" in payload["error"]
+
+
+async def test_get_stem_events_rejects_inverted_window_before_analysing(
+    click_track: Path, isolated_config: ServerConfig, monkeypatch
+):
+    def boom(*_a, **_k):
+        raise AssertionError("analysed despite invalid arguments")
+
+    monkeypatch.setattr(server_module, "_analyze_in_thread", boom)
+
+    payload, _ = await _call(
+        "get_stem_events",
+        {
+            "mp3_path": str(click_track),
+            "stem": "drums",
+            "kind": "onsets",
+            "start_ms": 3000,
+            "end_ms": 1000,
+        },
+    )
+
+    assert "start_ms" in payload["error"]
+    assert "end_ms" in payload["error"]
+
+
+async def test_get_stem_events_reports_error_when_stems_unavailable(
+    click_track: Path, isolated_config: ServerConfig
+):
+    from xlights_mcp.audio.stem_events import STEMS_UNAVAILABLE
+
+    _cache_fake_analysis(click_track, isolated_config, with_stems=False)
+
+    payload, _ = await _call(
+        "get_stem_events", {"mp3_path": str(click_track), "stem": "drums", "kind": "onsets"}
+    )
+
+    assert payload["error"] == STEMS_UNAVAILABLE
