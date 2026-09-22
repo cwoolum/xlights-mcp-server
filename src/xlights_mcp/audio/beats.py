@@ -104,6 +104,11 @@ def detect_beats(audio_path: Path, sr: int = 22050, drums: StemOnsets | None = N
     if grid is not None:
         beat_times, downbeat_idx = grid
         beat_source = "madmom"
+        if not downbeat_idx and beat_times:
+            # madmom found beats but never settled on a bar-position-1 row; fall
+            # back to librosa's default of every 4th beat. Superseded below if a
+            # drum stem supplies real anchors.
+            downbeat_idx = list(range(0, len(beat_times), BEATS_PER_BAR))
     else:
         _, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
         beat_times = librosa.frames_to_time(beat_frames, sr=sr).tolist()

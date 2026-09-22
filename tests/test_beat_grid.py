@@ -12,6 +12,7 @@ from drum_fixtures import make_drum_stem
 
 from xlights_mcp.audio import beats as beats_module
 from xlights_mcp.audio.beats import anchor_downbeats, detect_beats, snap_beats
+from xlights_mcp.audio.drums import BEATS_PER_BAR
 
 
 def test_snap_moves_a_late_grid_onto_drum_onsets():
@@ -171,6 +172,27 @@ def test_isolated_hit_in_a_gap_does_not_reset_bar_phase(click_track: Path, monke
     # anchor at 21.0 (beat 42, i.e. 42 % 4 == 2) re-phases the whole song
     assert result.downbeat_times == [grid[i] for i in range(2, 80, 4)]
     assert 15.5 not in result.downbeat_times
+
+
+def test_detect_beats_falls_back_to_every_fourth_beat_when_madmom_has_no_bar_one_rows(
+    click_track: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.undo()  # restore the real _madmom_grid; drives it via the fake madmom modules
+    # No row has bar position 1 -- madmom found beats but never settled on where
+    # bar 1 falls. With no drum stem to anchor from either, downbeats must fall
+    # back to every 4th beat, the same default librosa uses.
+    _install_fake_madmom(
+        monkeypatch,
+        dbn_result=np.array([[0.5, 2], [1.0, 3], [1.5, 4], [2.0, 2], [2.5, 3]]),
+    )
+
+    result = detect_beats(click_track)
+
+    assert result.beat_source == "madmom"
+    assert result.beat_times == [0.5, 1.0, 1.5, 2.0, 2.5]
+    assert result.downbeat_times == [
+        result.beat_times[i] for i in range(0, len(result.beat_times), BEATS_PER_BAR)
+    ]
 
 
 def test_detect_beats_uses_madmom_grid_when_available(click_track: Path, monkeypatch):
