@@ -305,6 +305,11 @@ SECTION_TYPE_CONFIG: dict[str, dict] = {
     "instrumental": {"use_motion": True, "use_accents": True},
 }
 
+# Drum-derived labels reuse the closest existing behaviour until they get their own recipes.
+SECTION_TYPE_CONFIG["build"] = SECTION_TYPE_CONFIG["transition"]
+SECTION_TYPE_CONFIG["drop"] = SECTION_TYPE_CONFIG["chorus"]
+SECTION_TYPE_CONFIG["breakdown"] = SECTION_TYPE_CONFIG["bridge"]
+
 
 # ---------------------------------------------------------------------------
 # Model grouping — auto-detect groups from model names
