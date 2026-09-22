@@ -161,17 +161,21 @@ def test_jittered_anchor_after_downbeat_drift_does_not_corrupt_the_second_drop()
     assert sections[4].drums == "present"
 
 
-def test_anchor_beyond_the_downbeat_grid_does_not_falsely_start_a_drop():
+def test_boundary_beyond_the_downbeat_grid_keeps_its_raw_time():
     # The downbeat grid only covers 0-60 s; the second run starts at 100 s, well
-    # past it. A naive nearest-downbeat snap would clamp that anchor to 60 s and
-    # falsely claim the section from 60 s onward as a "drop", even though drums
-    # are still silent there until 100 s. The section should instead fall back
-    # to inheriting the preceding drums-present label.
+    # past it. Clamping that boundary to the nearest downbeat (60 s) would cut
+    # the breakdown short and falsely claim drums are present from 60 s, 40 s
+    # before they actually resume. Since no downbeat is nearby, the boundary
+    # (and the anchor at the same point) must keep its raw, unsnapped time.
     downbeats = [2.0 * i for i in range(31)]  # 0, 2, .., 60
     sections = _label_with_downbeats([(0, 20), (100, 140)], 140, downbeats)
 
-    assert [s.label for s in sections] == ["intro", "breakdown", "intro"]
-    assert [s.start_time for s in sections] == [0.0, 20.0, 60.0]
+    assert _summary(sections) == [
+        ("intro", 0.0, 20.0),
+        ("breakdown", 20.0, 100.0),
+        ("drop", 100.0, 140.0),
+    ]
+    assert [s.drums for s in sections] == ["present", "absent", "present"]
 
 
 def test_merge_short_sections_merge_into_predecessor_and_first_into_successor():

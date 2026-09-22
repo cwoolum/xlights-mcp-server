@@ -5,7 +5,7 @@ Implements the labels table in docs/superpowers/specs/2026-09-22-stem-aware-anal
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from itertools import pairwise
 
 import numpy as np
@@ -38,11 +38,11 @@ def label_edm_sections(
             drum_bounds.append(g.end)
     novelty = [n for n in novelty_times if all(abs(n - d) >= NOVELTY_MERGE_S for d in drum_bounds)]
 
-    inner = sorted({_snap(t, downbeats) for t in drum_bounds + novelty})
+    max_dist = 2 * beat_period  # half a bar: snapping this far is no longer "nearby"
+    inner = sorted({_snap(t, downbeats, max_dist) for t in drum_bounds + novelty})
     points = [0.0] + [p for p in inner if 0.0 < p < duration] + [float(duration)]
 
-    valid_anchors = _valid_anchors(anchor_starts(gaps), downbeats, beat_period)
-    anchors = {_snap(a, downbeats) for a in valid_anchors}
+    anchors = {_snap(a, downbeats, max_dist) for a in anchor_starts(gaps)}
     min_len = (BEATS_PER_BAR - 0.5) * beat_period
     points = _merge_short(points, min_len, protected=anchors)
 
@@ -56,7 +56,7 @@ def label_edm_sections(
             first_in_gap = id(gap) not in seen_gaps
             seen_gaps.add(id(gap))
             fade = "decaying" if first_in_gap and gap.decaying else "absent"
-            label, drums = _gap_label(gap, start, novelty, downbeats, fade)
+            label, drums = _gap_label(gap, start, novelty, downbeats, max_dist, fade)
         elif _is_anchor(start, anchors):
             label, drums = "drop", "present"
         elif idx == 0:
@@ -84,7 +84,12 @@ def label_edm_sections(
 
 
 def _gap_label(
-    gap: DrumGap, start: float, novelty: list[float], downbeats: np.ndarray, fade: str
+    gap: DrumGap,
+    start: float,
+    novelty: list[float],
+    downbeats: np.ndarray,
+    max_dist: float,
+    fade: str,
 ) -> tuple[str, str]:
     if gap.kind == "leading":
         return "intro", "absent"
@@ -93,32 +98,30 @@ def _gap_label(
     if gap.bars <= BUILD_MAX_BARS:
         return "build", fade
     inside = [n for n in novelty if gap.start < n < gap.end]
-    if inside and start >= _snap(max(inside), downbeats):
+    if inside and start >= _snap(max(inside), downbeats, max_dist):
         return "build", "absent"
     return "breakdown", fade
 
 
-def _snap(t: float, downbeats: np.ndarray) -> float:
+def _close(a: float, b: float, tol: float = 1e-6) -> bool:
+    return abs(a - b) < tol
+
+
+def _snap(t: float, downbeats: np.ndarray, max_dist: float) -> float:
+    """The nearest downbeat, but only if it is actually nearby.
+
+    A boundary the downbeat grid doesn't reach (nearest downbeat farther than
+    max_dist) keeps its raw time rather than being clamped to a distant downbeat.
+    """
     if downbeats.size == 0:
         return float(t)
-    return float(downbeats[np.argmin(np.abs(downbeats - t))])
+    idx = np.argmin(np.abs(downbeats - t))
+    nearest = float(downbeats[idx])
+    return nearest if abs(nearest - t) <= max_dist else float(t)
 
 
 def _is_anchor(t: float, anchors: set[float]) -> bool:
-    return any(abs(t - a) < 1e-6 for a in anchors)
-
-
-def _valid_anchors(anchors: list[float], downbeats: np.ndarray, beat_period: float) -> list[float]:
-    """Anchors whose nearest downbeat is within half a bar.
-
-    Mirrors beats.py's re-anchoring guard (there: nearest beat within half a beat
-    period): a run start the beat grid doesn't reach isn't a `drop` boundary. With
-    no downbeats there is nothing to check against, so every anchor stays valid.
-    """
-    if downbeats.size == 0:
-        return list(anchors)
-    half_bar = 2 * beat_period
-    return [a for a in anchors if np.min(np.abs(downbeats - a)) <= half_bar]
+    return any(_close(t, a) for a in anchors)
 
 
 def _merge_short(
@@ -135,27 +138,27 @@ def _merge_short(
     """
     protected = protected or set()
 
-    def is_protected(p: float) -> bool:
-        return any(abs(p - q) < 1e-6 for q in protected)
+    def has_close(value: float, collection: Iterable[float]) -> bool:
+        return any(_close(value, q) for q in collection)
 
     pts = list(points)
-    unmergeable: set[float] = set()
+    unmergeable: list[float] = []
     while len(pts) > 2:
         short = next(
             (
                 k
                 for k in range(len(pts) - 1)
-                if pts[k + 1] - pts[k] < min_len - 1e-6 and pts[k] not in unmergeable
+                if pts[k + 1] - pts[k] < min_len - 1e-6 and not has_close(pts[k], unmergeable)
             ),
             None,
         )
         if short is None:
             break
         start = pts[short]
-        if short == 0 or is_protected(start):
+        if short == 0 or has_close(start, protected):
             end_idx = short + 1
-            if end_idx == len(pts) - 1 or is_protected(pts[end_idx]):
-                unmergeable.add(start)
+            if end_idx == len(pts) - 1 or has_close(pts[end_idx], protected):
+                unmergeable.append(start)
                 continue
             del pts[end_idx]
         else:
