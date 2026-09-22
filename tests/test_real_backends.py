@@ -30,3 +30,5 @@ def test_full_analysis_with_real_backends(click_track: Path, tmp_path: Path):
 
     assert analysis.duration_seconds == pytest.approx(3.0, abs=0.1)
     assert analysis.beats.tempo > 0
+    assert analysis.stem_analysis.available
+    assert analysis.beats.beat_source == "madmom"
