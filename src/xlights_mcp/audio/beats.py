@@ -152,6 +152,9 @@ def _madmom_grid(audio_path: Path) -> tuple[list[float], list[int]] | None:
     """Beat times and indices of madmom's bar-position-1 beats, or None if unavailable."""
     try:
         from madmom.features.downbeats import DBNDownBeatTrackingProcessor, RNNDownBeatProcessor
+    except ImportError:
+        logger.debug("madmom not installed, using librosa beat tracking")
+        return None
     except Exception as e:  # noqa: BLE001 - a broken madmom install must fall back, not abort
         logger.warning(f"madmom unavailable, using librosa beat tracking: {e}")
         return None

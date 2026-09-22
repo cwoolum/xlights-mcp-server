@@ -51,6 +51,8 @@ def validate_stem_query(
         return f"Unknown resolution '{resolution}'. Valid: {', '.join(VALID_RESOLUTIONS)}"
     if max_events < 1:
         return "max_events must be >= 1"
+    if (start_ms is not None and start_ms < 0) or (end_ms is not None and end_ms < 0):
+        return "start_ms and end_ms must be >= 0"
     if start_ms is not None and end_ms is not None and start_ms > end_ms:
         return "start_ms must be <= end_ms"
     return None

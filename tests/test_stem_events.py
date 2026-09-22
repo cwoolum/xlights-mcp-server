@@ -159,6 +159,21 @@ def test_validate_stem_query_allows_equal_start_and_end():
     assert validate_stem_query("drums", "onsets", "beat", start_ms=1000, end_ms=1000) is None
 
 
+@pytest.mark.parametrize(("start_ms", "end_ms"), [(-1, None), (None, -1), (-500, 1000)])
+def test_negative_start_or_end_errors(analysis, start_ms, end_ms):
+    payload = stem_events(analysis, "drums", "onsets", start_ms=start_ms, end_ms=end_ms)
+
+    assert payload["error"] == "start_ms and end_ms must be >= 0"
+
+
+@pytest.mark.parametrize(("start_ms", "end_ms"), [(-1, None), (None, -1), (-500, 1000)])
+def test_validate_stem_query_rejects_negative_start_or_end(start_ms, end_ms):
+    assert (
+        validate_stem_query("drums", "onsets", "beat", start_ms=start_ms, end_ms=end_ms)
+        == "start_ms and end_ms must be >= 0"
+    )
+
+
 def test_energy_leading_span_when_grid_starts_late(analysis):
     analysis.beats.beat_times = [4.0, 8.0, 12.0, 16.0]
 

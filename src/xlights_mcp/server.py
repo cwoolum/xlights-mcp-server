@@ -323,7 +323,7 @@ async def analyze_song(mp3_path: str, ctx: Context, force: bool = False) -> dict
     summary; use get_beat_map / get_energy_profile / get_song_structure / get_stem_events for
     detailed data.
 
-    Returns (in addition to the fields below): stems is a per-stem summary
+    The response also includes: stems is a per-stem summary
     {onsets, mean_energy, silences_ms} keyed by "drums"/"bass"/"vocals"/"other", or
     null when source separation is unavailable — in that case get_stem_events will
     also return an error. sections[].drums is "present"/"absent"/"decaying", or null
@@ -430,17 +430,18 @@ async def get_stem_events(
     """Get per-stem events from source separation (drums, bass, vocals, other).
 
     Requires source separation to have run for this file: if analyze_song returned
-    "stems": null, this returns {"error": ...} rather than analysing.
+    "stems": null, this returns {"error": ...}.
 
     kind="onsets": hit times in the window, e.g. drum hits or vocal phrase starts.
     Returns {"count", "events_ms": [int, ...]}; count is the total number of onsets
     in the window before any truncation.
 
     kind="energy": stem loudness over the window, one point per beat (resolution=
-    "beat") or bar ("bar") span that starts inside the window (plus a leading point
-    for [0, first_grid_time) when the beat/bar grid starts after the window's own
-    start). Returns {"resolution", "points": [{"t_ms", "energy"}, ...]}; energy is
-    0-1, rounded to 3 decimal places.
+    "beat") or bar ("bar") span that starts inside the window. If the grid starts at
+    least half a beat/bar after 0, an extra point at t_ms=0 covers the intro
+    [0, first grid time); like any point, it is only returned when the window
+    includes 0. Returns {"resolution", "points": [{"t_ms", "energy"}, ...]}; energy
+    is 0-1, rounded to 3 decimal places.
 
     kind="silences": [start, end] ms spans where the stem is silent, clipped to the
     window. Returns {"spans_ms": [[start, end], ...]} and is never truncated. For
