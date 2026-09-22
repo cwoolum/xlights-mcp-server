@@ -18,7 +18,7 @@ def _label_with_downbeats(
     runs = drum_runs(stem, beat_period=PERIOD, duration=duration)
     gaps = drum_gaps(runs, stem, duration=duration, beat_period=PERIOD)
     return label_edm_sections(
-        runs, gaps, list(novelty), list(downbeats), duration, PERIOD, energy_at=energy_at
+        gaps, list(novelty), list(downbeats), duration, PERIOD, energy_at=energy_at
     )
 
 

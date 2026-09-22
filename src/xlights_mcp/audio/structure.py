@@ -83,7 +83,7 @@ def detect_structure(
             presence = merge_short_stops(runs, gaps)
             if has_mid_structural_gap(gaps):
                 sections = label_edm_sections(
-                    runs, gaps, novelty_times, beats.downbeat_times, duration, beat_period, energy_at
+                    gaps, novelty_times, beats.downbeat_times, duration, beat_period, energy_at
                 )
                 logger.info(f"Detected {len(sections)} sections from drum stem: {[s.label for s in sections]}")
                 return sections

@@ -85,7 +85,7 @@ def test_mid_structural_gap_switches_to_edm_labels(click_track: Path, monkeypatc
     edm = [SongSection(label="drop", start_time=0.0, end_time=130.0, structure_source="stems")]
     captured = {}
 
-    def fake_label(runs, gaps, novelty, downbeats, duration, beat_period, energy_at):
+    def fake_label(gaps, novelty, downbeats, duration, beat_period, energy_at):
         captured["duration"] = duration
         captured["beat_period"] = beat_period
         captured["downbeats"] = downbeats

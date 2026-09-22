@@ -10,7 +10,7 @@ from itertools import pairwise
 
 import numpy as np
 
-from xlights_mcp.audio.drums import BEATS_PER_BAR, DrumGap, DrumRun, anchor_starts
+from xlights_mcp.audio.drums import BEATS_PER_BAR, DrumGap, anchor_starts
 from xlights_mcp.audio.sections import SongSection
 
 NOVELTY_MERGE_S = 2.0
@@ -21,7 +21,6 @@ EDM_CONFIDENCE = 0.9
 
 
 def label_edm_sections(
-    runs: list[DrumRun],
     gaps: list[DrumGap],
     novelty_times: list[float],
     downbeat_times: list[float],
