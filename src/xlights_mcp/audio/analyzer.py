@@ -88,13 +88,15 @@ def full_analysis(
     report(1, "Separating stems")
     stems = StemPaths()
     stem_analysis = StemAnalysis()
+    stem_pipeline_failed = False
     try:
         stems = separate_stems(audio_path)
         if stems.available:
             report(2, "Analyzing stems")
             stem_analysis = analyze_stems(stems, sr=sr)
-    except Exception as e:
-        logger.info(f"Stem analysis unavailable: {e}")
+    except Exception as e:  # noqa: BLE001 - stem separation/analysis can fail many ways; must not abort
+        logger.warning(f"Stem separation/analysis failed, continuing without stems: {e}")
+        stem_pipeline_failed = True
 
     drums = stem_analysis.stems.get("drums") if stem_analysis.available else None
     report(3, "Detecting beats and tempo")
@@ -121,7 +123,13 @@ def full_analysis(
         f"stems={'yes' if stem_analysis.available else 'no'}"
     )
 
-    save_cached(analysis, audio_path, audio_config.cache_dir)
+    if stem_pipeline_failed:
+        logger.warning(
+            "Not caching this result because stem separation/analysis failed; "
+            "a later call will retry it."
+        )
+    else:
+        save_cached(analysis, audio_path, audio_config.cache_dir)
     report(_STAGE_COUNT, "Analysis complete")
     return analysis
 

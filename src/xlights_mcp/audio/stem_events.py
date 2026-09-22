@@ -14,7 +14,11 @@ if TYPE_CHECKING:
 VALID_STEMS = ("drums", "bass", "vocals", "other")
 VALID_KINDS = ("onsets", "energy", "silences")
 VALID_RESOLUTIONS = ("beat", "bar")
-STEMS_UNAVAILABLE = 'Stem analysis unavailable. Install with: uv pip install -e ".[separation]"'
+STEMS_UNAVAILABLE = (
+    'Stem analysis unavailable. Install with: uv pip install -e ".[separation]" '
+    "or re-run analyze_song with force=true if separation was installed after this song "
+    "was analyzed."
+)
 
 
 def _ms(t: float) -> int:

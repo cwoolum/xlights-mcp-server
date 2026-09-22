@@ -72,6 +72,59 @@ def test_force_bypasses_cache(click_track: Path, tmp_path: Path):
     assert again.cached is False
 
 
+def test_failed_stem_separation_is_not_cached(
+    click_track: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from xlights_mcp.audio import cache
+
+    config = _config(tmp_path)
+
+    def boom(_path):
+        raise RuntimeError("demucs blew up")
+
+    monkeypatch.setattr(analyzer, "separate_stems", boom)
+
+    analysis = full_analysis(click_track, config)
+
+    assert analysis.stem_analysis.available is False
+    assert not cache.cache_path(click_track, config.cache_dir).exists()
+
+
+def test_failed_stem_analysis_is_not_cached(
+    click_track: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from xlights_mcp.audio import cache
+    from xlights_mcp.audio.separator import StemPaths
+
+    config = _config(tmp_path)
+
+    monkeypatch.setattr(analyzer, "separate_stems", lambda _p: StemPaths(available=True))
+
+    def boom(_stems, sr):
+        raise RuntimeError("librosa blew up")
+
+    monkeypatch.setattr(analyzer, "analyze_stems", boom)
+
+    analysis = full_analysis(click_track, config)
+
+    assert analysis.stem_analysis.available is False
+    assert not cache.cache_path(click_track, config.cache_dir).exists()
+
+
+def test_stems_unavailable_without_error_is_still_cached(
+    click_track: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from xlights_mcp.audio import cache
+    from xlights_mcp.audio.separator import StemPaths
+
+    config = _config(tmp_path)
+    monkeypatch.setattr(analyzer, "separate_stems", lambda _p: StemPaths(available=False))
+
+    full_analysis(click_track, config)
+
+    assert cache.cache_path(click_track, config.cache_dir).exists()
+
+
 def test_cache_ignores_entries_written_by_the_previous_version(
     click_track: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
