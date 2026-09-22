@@ -49,11 +49,13 @@ _STAGE_COUNT = 5
 def full_analysis(
     audio_path: Path,
     audio_config: AudioConfig | None = None,
-    include_stems: bool = False,
     progress: ProgressCallback | None = None,
     force: bool = False,
 ) -> SongAnalysis:
     """Run the complete audio analysis pipeline.
+
+    Source separation (Demucs) is always attempted; it's a no-op returning
+    StemPaths(available=False) when the optional dependency isn't installed.
 
     Results are cached on disk (keyed by file content); a cache hit returns
     immediately with ``cached=True``.
@@ -61,7 +63,6 @@ def full_analysis(
     Args:
         audio_path: Path to the audio file (.mp3, .wav, etc.)
         audio_config: Audio configuration settings
-        include_stems: Whether to run Demucs source separation
         progress: Optional callback invoked at each stage boundary
         force: Re-run analysis even if a cached result exists
     """
