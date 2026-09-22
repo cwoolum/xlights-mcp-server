@@ -68,6 +68,8 @@ def _install_fake_madmom(
     dbn_calls: list[dict] | None = None,
 ) -> None:
     """Install a fake madmom.features.downbeats module tree in sys.modules."""
+    if dbn_result is None:
+        dbn_result = np.empty((0, 2))
 
     class FakeRNNDownBeatProcessor:
         def __call__(self, _path: str) -> str:
@@ -118,6 +120,12 @@ def test_madmom_grid_returns_none_when_rnn_processor_fails(monkeypatch: pytest.M
 
 def test_madmom_grid_returns_none_when_dbn_result_is_empty(monkeypatch: pytest.MonkeyPatch):
     _install_fake_madmom(monkeypatch, dbn_result=np.empty((0, 2)))
+
+    assert beats_module._madmom_grid(Path("song.wav")) is None
+
+
+def test_madmom_grid_returns_none_when_madmom_is_not_importable(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setitem(sys.modules, "madmom.features.downbeats", None)
 
     assert beats_module._madmom_grid(Path("song.wav")) is None
 
