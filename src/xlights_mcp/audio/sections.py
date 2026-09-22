@@ -15,7 +15,7 @@ SECTION_LABELS: tuple[str, ...] = (
 class SongSection(BaseModel):
     """A detected section of a song."""
 
-    label: str  # one of SECTION_LABELS
+    label: str  # see SECTION_LABELS; the mixdown labeller may also emit "unknown" placeholders
     start_time: float  # seconds
     end_time: float  # seconds
     energy_level: float = 0.0  # 0.0-1.0 average energy

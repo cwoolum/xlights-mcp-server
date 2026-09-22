@@ -32,7 +32,7 @@ def find_silences(
     """Spans where normalised energy stays below threshold for at least min_len seconds."""
     spans: list[tuple[float, float]] = []
     start: float | None = None
-    for t, e in zip(times, energy):
+    for t, e in zip(times, energy, strict=True):
         if e < threshold:
             if start is None:
                 start = float(t)
@@ -59,7 +59,7 @@ class DrumGap(BaseModel):
     decaying: bool
 
 
-def drum_runs(drums: StemOnsets, beat_period: float, duration: float) -> list[DrumRun]:
+def drum_runs(drums: StemOnsets, *, beat_period: float, duration: float) -> list[DrumRun]:
     """Stretches between drum silences that hold at least one bar of onsets."""
     onsets = np.sort(np.asarray(drums.onset_times, dtype=float))
     stretches: list[tuple[float, float]] = []
@@ -79,7 +79,7 @@ def drum_runs(drums: StemOnsets, beat_period: float, duration: float) -> list[Dr
 
 
 def drum_gaps(
-    runs: list[DrumRun], drums: StemOnsets, duration: float, beat_period: float
+    runs: list[DrumRun], drums: StemOnsets, *, duration: float, beat_period: float
 ) -> list[DrumGap]:
     """Leading, between-run and trailing gaps, measured last onset to next first onset."""
     if not runs:
@@ -93,22 +93,53 @@ def drum_gaps(
     if runs[-1].end < duration:
         spans.append(("trailing", runs[-1].end, duration, runs[-1]))
 
-    return [
-        DrumGap(
-            start=start,
-            end=end,
-            bars=(end - start) / bar,
-            kind=kind,
-            structural=end - start >= STRUCTURAL_GAP_S,
-            decaying=prev is not None and _decays(prev.end, end, drums.silences),
+    gaps: list[DrumGap] = []
+    for kind, start, end, prev in spans:
+        structural = end - start >= STRUCTURAL_GAP_S
+        decaying = structural and prev is not None and _decays(
+            prev.end, end, drums.silences, trailing=kind == "trailing"
         )
-        for kind, start, end, prev in spans
-    ]
+        gaps.append(
+            DrumGap(
+                start=start,
+                end=end,
+                bars=(end - start) / bar,
+                kind=kind,
+                structural=structural,
+                decaying=decaying,
+            )
+        )
+    return gaps
 
 
-def _decays(last_onset: float, gap_end: float, silences: list[tuple[float, float]]) -> bool:
+def _decays(
+    last_onset: float,
+    gap_end: float,
+    silences: list[tuple[float, float]],
+    *,
+    trailing: bool = False,
+) -> bool:
     following = [s for s, _ in silences if last_onset - _EDGE_TOLERANCE_S <= s < gap_end]
-    return bool(following) and min(following) - last_onset > DECAY_S
+    if following:
+        return min(following) - last_onset > DECAY_S
+    # A trailing gap with no recorded silence never cuts cleanly: the stem is
+    # still ringing or fading out all the way to the track end.
+    return trailing
+
+
+def merge_short_stops(runs: list[DrumRun], gaps: list[DrumGap]) -> list[DrumRun]:
+    """Fold non-structural mid gaps into their neighbours: drums count as present
+    through a short stop, per the spec's run/gap distinction."""
+    if not runs:
+        return []
+    mid_gaps = [g for g in gaps if g.kind == "mid"]
+    merged = [runs[0]]
+    for run, gap in zip(runs[1:], mid_gaps, strict=True):
+        if gap.structural:
+            merged.append(run)
+        else:
+            merged[-1] = DrumRun(start=merged[-1].start, end=run.end)
+    return merged
 
 
 def anchor_starts(gaps: list[DrumGap]) -> list[float]:
