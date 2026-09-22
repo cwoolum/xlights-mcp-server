@@ -99,8 +99,8 @@ def _install_fake_madmom(
     monkeypatch.setitem(sys.modules, "madmom.features.downbeats", downbeats_mod)
 
 
+@pytest.mark.real_madmom_grid
 def test_madmom_grid_returns_beats_and_bar_one_indices(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.undo()  # restore the real _madmom_grid; this test exercises it directly
     calls: list[dict] = []
     _install_fake_madmom(
         monkeypatch,
@@ -114,22 +114,22 @@ def test_madmom_grid_returns_beats_and_bar_one_indices(monkeypatch: pytest.Monke
     assert calls == [{"beats_per_bar": [4], "fps": 100}]
 
 
+@pytest.mark.real_madmom_grid
 def test_madmom_grid_returns_none_when_rnn_processor_fails(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.undo()  # restore the real _madmom_grid; this test exercises it directly
     _install_fake_madmom(monkeypatch, rnn_error=RuntimeError("boom"))
 
     assert beats_module._madmom_grid(Path("song.wav")) is None
 
 
+@pytest.mark.real_madmom_grid
 def test_madmom_grid_returns_none_when_dbn_result_is_empty(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.undo()  # restore the real _madmom_grid; this test exercises it directly
     _install_fake_madmom(monkeypatch, dbn_result=np.empty((0, 2)))
 
     assert beats_module._madmom_grid(Path("song.wav")) is None
 
 
+@pytest.mark.real_madmom_grid
 def test_madmom_grid_returns_none_when_madmom_is_not_importable(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.undo()  # restore the real _madmom_grid; this test exercises it directly
     monkeypatch.setitem(sys.modules, "madmom.features.downbeats", None)
 
     assert beats_module._madmom_grid(Path("song.wav")) is None
@@ -174,10 +174,10 @@ def test_isolated_hit_in_a_gap_does_not_reset_bar_phase(click_track: Path, monke
     assert 15.5 not in result.downbeat_times
 
 
+@pytest.mark.real_madmom_grid
 def test_detect_beats_falls_back_to_every_fourth_beat_when_madmom_has_no_bar_one_rows(
     click_track: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.undo()  # restore the real _madmom_grid; drives it via the fake madmom modules
     # No row has bar position 1 -- madmom found beats but never settled on where
     # bar 1 falls. With no drum stem to anchor from either, downbeats must fall
     # back to every 4th beat, the same default librosa uses.

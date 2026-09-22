@@ -62,4 +62,5 @@ testpaths = ["tests"]
 addopts = "-m 'not real_backends'"
 markers = [
     "real_backends: exercises the real demucs/madmom backends (slow, requires them installed); run with -m real_backends",
+    "real_madmom_grid: exercises _madmom_grid's real import/error handling via a fake madmom module in sys.modules; fast, no real backend needed, included in the default run",
 ]

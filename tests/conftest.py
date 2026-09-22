@@ -21,6 +21,12 @@ def _stub_heavy_backends(request: pytest.FixtureRequest, monkeypatch: pytest.Mon
     monkeypatch these itself -- that patch is applied after this fixture's, on the
     same shared `monkeypatch` instance, so it wins -- or be marked
     @pytest.mark.real_backends to skip this stub entirely.
+
+    @pytest.mark.real_madmom_grid skips only the _madmom_grid half: tests that
+    exercise _madmom_grid's own import/error handling via a fake madmom module
+    (installed in sys.modules) need the real function, not this stub, but don't
+    touch any real backend and so aren't excluded from the default run the way
+    real_backends is.
     """
     if request.node.get_closest_marker("real_backends"):
         return
@@ -29,7 +35,8 @@ def _stub_heavy_backends(request: pytest.FixtureRequest, monkeypatch: pytest.Mon
     from xlights_mcp.audio.separator import StemPaths
 
     monkeypatch.setattr(analyzer, "separate_stems", lambda _path: StemPaths(available=False))
-    monkeypatch.setattr(beats, "_madmom_grid", lambda _path: None)
+    if not request.node.get_closest_marker("real_madmom_grid"):
+        monkeypatch.setattr(beats, "_madmom_grid", lambda _path: None)
 
 
 @pytest.fixture
