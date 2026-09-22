@@ -35,7 +35,14 @@ def stems_summary(analysis: SongAnalysis) -> dict[str, dict] | None:
     }
 
 
-def validate_stem_query(stem: str, kind: str, resolution: str, max_events: int = 500) -> str | None:
+def validate_stem_query(
+    stem: str,
+    kind: str,
+    resolution: str,
+    max_events: int = 500,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+) -> str | None:
     if stem not in VALID_STEMS:
         return f"Unknown stem '{stem}'. Valid: {', '.join(VALID_STEMS)}"
     if kind not in VALID_KINDS:
@@ -44,6 +51,8 @@ def validate_stem_query(stem: str, kind: str, resolution: str, max_events: int =
         return f"Unknown resolution '{resolution}'. Valid: {', '.join(VALID_RESOLUTIONS)}"
     if max_events < 1:
         return "max_events must be >= 1"
+    if start_ms is not None and end_ms is not None and start_ms > end_ms:
+        return "start_ms must be <= end_ms"
     return None
 
 
@@ -56,11 +65,9 @@ def stem_events(
     max_events: int = 500,
     resolution: str = "beat",
 ) -> dict[str, Any]:
-    error = validate_stem_query(stem, kind, resolution, max_events)
+    error = validate_stem_query(stem, kind, resolution, max_events, start_ms=start_ms, end_ms=end_ms)
     if error:
         return {"error": error}
-    if start_ms is not None and end_ms is not None and start_ms > end_ms:
-        return {"error": "start_ms must be <= end_ms"}
 
     sa = analysis.stem_analysis
     if not sa.available:
@@ -83,19 +90,23 @@ def stem_events(
     if kind == "silences":
         spans_ms = []
         for a, b in s.silences:
-            a_ms, b_ms = _ms(a), _ms(b)
-            if b_ms > lo_ms and a_ms < hi_ms:
-                spans_ms.append([max(a_ms, lo_ms), min(b_ms, hi_ms)])
+            clip_start = max(_ms(a), lo_ms)
+            clip_end = min(_ms(b), hi_ms)
+            if clip_start < clip_end:
+                spans_ms.append([clip_start, clip_end])
         base["spans_ms"] = spans_ms
         return base
 
     grid = analysis.beats.beat_times if resolution == "beat" else analysis.beats.downbeat_times
     if not grid:
         edges = [0.0, analysis.duration_seconds]
-    elif grid[0] > 0:
-        edges = [0.0, *grid, analysis.duration_seconds]
     else:
-        edges = [*grid, analysis.duration_seconds]
+        first_interval = grid[1] - grid[0] if len(grid) > 1 else grid[0]
+        add_leading = _ms(grid[0]) > 0 and grid[0] >= first_interval / 2
+        if add_leading:
+            edges = [0.0, *grid, analysis.duration_seconds]
+        else:
+            edges = [*grid, analysis.duration_seconds]
     times = np.asarray(s.energy_times, dtype=float)
     energy = np.asarray(s.energy, dtype=float)
     points = []

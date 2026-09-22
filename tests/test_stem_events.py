@@ -83,6 +83,14 @@ def test_silences_are_clipped_to_window(analysis):
     assert 11900 < end < 12100
 
 
+def test_silences_zero_length_window_returns_empty(analysis):
+    # 9000ms falls inside the drum-gap silence (~7755-12005ms); an equal
+    # start/end window clips to a zero-length span, which must be dropped.
+    payload = stem_events(analysis, "drums", "silences", start_ms=9000, end_ms=9000)
+
+    assert payload["spans_ms"] == []
+
+
 def test_energy_near_zero_during_drum_gap(analysis):
     payload = stem_events(analysis, "drums", "energy", start_ms=8000, end_ms=12000)
 
@@ -140,12 +148,47 @@ def test_start_after_end_errors(analysis):
     assert payload["error"] == "start_ms must be <= end_ms"
 
 
+def test_validate_stem_query_start_after_end_errors():
+    assert (
+        validate_stem_query("drums", "onsets", "beat", start_ms=3000, end_ms=1000)
+        == "start_ms must be <= end_ms"
+    )
+
+
+def test_validate_stem_query_allows_equal_start_and_end():
+    assert validate_stem_query("drums", "onsets", "beat", start_ms=1000, end_ms=1000) is None
+
+
 def test_energy_leading_span_when_grid_starts_late(analysis):
     analysis.beats.beat_times = [4.0, 8.0, 12.0, 16.0]
 
     payload = stem_events(analysis, "drums", "energy")
 
     assert payload["points"][0]["t_ms"] == 0
+    assert payload["points"][0]["energy"] == pytest.approx(1.0, abs=0.01)
+    assert payload["points"][1]["t_ms"] == 4000
+
+
+def test_energy_no_leading_span_for_negligible_grid_offset(analysis):
+    # grid[0] rounds to 0ms; a synthetic 0.0 edge would duplicate it.
+    analysis.beats.beat_times[0] = 0.0004
+    grid_len = len(analysis.beats.beat_times)
+
+    payload = stem_events(analysis, "drums", "energy")
+
+    assert len(payload["points"]) == grid_len
+    assert payload["points"][0]["t_ms"] == 0
+
+
+def test_energy_no_leading_span_when_offset_below_half_interval(analysis):
+    # grid[0] is 10ms, far less than half the ~500ms first interval.
+    analysis.beats.beat_times[0] = 0.010
+    grid_len = len(analysis.beats.beat_times)
+
+    payload = stem_events(analysis, "drums", "energy")
+
+    assert len(payload["points"]) == grid_len
+    assert payload["points"][0]["t_ms"] == 10
 
 
 def test_energy_empty_grid_returns_single_span(analysis):
