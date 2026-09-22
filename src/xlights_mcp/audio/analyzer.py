@@ -82,24 +82,25 @@ def full_analysis(
     sr = audio_config.sample_rate
     logger.info(f"Starting full analysis: {audio_path}")
 
-    report(0, "Detecting beats and tempo")
-    beats = detect_beats(audio_path, sr=sr)
-    report(1, "Analyzing spectrum and energy")
+    report(0, "Analyzing spectrum and energy")
     spectrum = analyze_spectrum(audio_path, sr=sr)
-    report(2, "Detecting song structure")
-    sections = detect_structure(audio_path, sr=sr)
-    report(3, "Separating stems")
 
-    # Always try stem separation (results are cached)
+    report(1, "Separating stems")
     stems = StemPaths()
     stem_analysis = StemAnalysis()
     try:
         stems = separate_stems(audio_path)
         if stems.available:
-            report(4, "Analyzing stems")
+            report(2, "Analyzing stems")
             stem_analysis = analyze_stems(stems, sr=sr)
     except Exception as e:
         logger.info(f"Stem analysis unavailable: {e}")
+
+    drums = stem_analysis.stems.get("drums") if stem_analysis.available else None
+    report(3, "Detecting beats and tempo")
+    beats = detect_beats(audio_path, sr=sr, drums=drums)
+    report(4, "Detecting song structure")
+    sections = detect_structure(audio_path, sr=sr, drums=drums, beats=beats)
 
     analysis = SongAnalysis(
         file_path=str(audio_path),
