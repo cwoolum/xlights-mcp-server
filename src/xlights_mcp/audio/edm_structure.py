@@ -40,13 +40,16 @@ def label_edm_sections(
 
     inner = sorted({_snap(t, downbeats) for t in drum_bounds + novelty})
     points = [0.0] + [p for p in inner if 0.0 < p < duration] + [float(duration)]
-    points = _merge_short(points, BEATS_PER_BAR * beat_period)
 
-    anchors = {_snap(a, downbeats) for a in anchor_starts(gaps)}
+    valid_anchors = _valid_anchors(anchor_starts(gaps), downbeats, beat_period)
+    anchors = {_snap(a, downbeats) for a in valid_anchors}
+    min_len = (BEATS_PER_BAR - 0.5) * beat_period
+    points = _merge_short(points, min_len, protected=anchors)
+
     seen_gaps: set[int] = set()
     labelled: list[tuple[str, str, float, float]] = []
-    prev_label: str | None = None
-    for start, end in pairwise(points):
+    prev_present_label: str | None = None
+    for idx, (start, end) in enumerate(pairwise(points)):
         mid = (start + end) / 2
         gap = next((g for g in structural if g.start <= mid < g.end), None)
         if gap is not None:
@@ -54,14 +57,15 @@ def label_edm_sections(
             seen_gaps.add(id(gap))
             fade = "decaying" if first_in_gap and gap.decaying else "absent"
             label, drums = _gap_label(gap, start, novelty, downbeats, fade)
-        elif start in anchors:
+        elif _is_anchor(start, anchors):
             label, drums = "drop", "present"
-        elif prev_label is None:
+        elif idx == 0:
             label, drums = "intro", "present"
         else:
-            label, drums = prev_label, "present"
+            label, drums = prev_present_label or "drop", "present"
+        if drums == "present":
+            prev_present_label = label
         labelled.append((label, drums, start, end))
-        prev_label = label
 
     energies = [energy_at(s, e) for _, _, s, e in labelled]
     peak = max(energies, default=0.0) or 1.0
@@ -100,15 +104,60 @@ def _snap(t: float, downbeats: np.ndarray) -> float:
     return float(downbeats[np.argmin(np.abs(downbeats - t))])
 
 
-def _merge_short(points: list[float], min_len: float) -> list[float]:
+def _is_anchor(t: float, anchors: set[float]) -> bool:
+    return any(abs(t - a) < 1e-6 for a in anchors)
+
+
+def _valid_anchors(anchors: list[float], downbeats: np.ndarray, beat_period: float) -> list[float]:
+    """Anchors whose nearest downbeat is within half a bar.
+
+    Mirrors beats.py's re-anchoring guard (there: nearest beat within half a beat
+    period): a run start the beat grid doesn't reach isn't a `drop` boundary. With
+    no downbeats there is nothing to check against, so every anchor stays valid.
+    """
+    if downbeats.size == 0:
+        return list(anchors)
+    half_bar = 2 * beat_period
+    return [a for a in anchors if np.min(np.abs(downbeats - a)) <= half_bar]
+
+
+def _merge_short(
+    points: list[float], min_len: float, protected: set[float] | None = None
+) -> list[float]:
     """Drop boundaries until every section is at least min_len long.
 
-    A short section merges into its predecessor; the first section merges into its successor.
+    A short section normally merges into its predecessor (its start boundary is
+    deleted). The first section instead merges into its successor (its end
+    boundary is deleted). A point in `protected` — a snapped drop anchor — is
+    never deleted: a short section starting at a protected point merges forward
+    instead, unless its end boundary is also protected or is the final point, in
+    which case the section is left short rather than dropping a real boundary.
     """
+    protected = protected or set()
+
+    def is_protected(p: float) -> bool:
+        return any(abs(p - q) < 1e-6 for q in protected)
+
     pts = list(points)
+    unmergeable: set[float] = set()
     while len(pts) > 2:
-        short = next((k for k in range(len(pts) - 1) if pts[k + 1] - pts[k] < min_len - 1e-6), None)
+        short = next(
+            (
+                k
+                for k in range(len(pts) - 1)
+                if pts[k + 1] - pts[k] < min_len - 1e-6 and pts[k] not in unmergeable
+            ),
+            None,
+        )
         if short is None:
             break
-        del pts[1 if short == 0 else short]
+        start = pts[short]
+        if short == 0 or is_protected(start):
+            end_idx = short + 1
+            if end_idx == len(pts) - 1 or is_protected(pts[end_idx]):
+                unmergeable.add(start)
+                continue
+            del pts[end_idx]
+        else:
+            del pts[short]
     return pts
