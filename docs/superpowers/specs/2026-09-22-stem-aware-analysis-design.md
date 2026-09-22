@@ -103,7 +103,7 @@ In `detect_beats(audio_path, sr, drums: StemOnsets | None = None)`:
 2. **Snap** (only when `drums` given). Each beat moves to the nearest drum onset within ±60 ms. Beats with no drum onset in range keep their position.
 3. **Re-anchor downbeats** (only when at least one anchor run exists). For each anchor run, the snapped beat nearest its `start` becomes a downbeat; every 4th beat after it is a downbeat until the next anchor. Beats before the first anchor are counted backwards from it in steps of 4. Where the count from one anchor meets the next anchor mid-bar, the shorter partial bar before the new anchor is intended (drops are placed against the phrase, not the previous bar count).
 4. When no anchor run exists (steady drums, or no drum onsets), downbeats stay as in step 1. Snapping still applies.
-5. `drum_aligned = True` when step 2 ran.
+5. `drum_aligned = True` when step 2 ran, i.e. `drums` was given and has at least one onset.
 6. `onset_times` stays the mixdown onsets. Per-stem onsets are served by `get_stem_events`.
 
 Measured on the reference track: madmom beats land within +7 / −16 / +22 ms of the three drum events but its downbeats are 438–467 ms off at both drops, which is why step 3 overrides bar phase at anchors regardless of source.
@@ -124,7 +124,7 @@ So a pop song with a drumless intro or a one-bar drum stop keeps pop labels; a t
 
 ### EDM labelling
 
-1. **Boundaries.** Candidates are every run start and run end adjacent to a structural gap, plus the existing novelty/energy boundaries. A novelty boundary within 2 s of a drum boundary is dropped in favour of the drum boundary. Every boundary snaps to the nearest downbeat. A section shorter than one bar merges into its predecessor; if it is the first section, into its successor.
+1. **Boundaries.** Candidates are every run start and run end adjacent to a structural gap, plus the existing novelty/energy boundaries. A novelty boundary within 2 s of a drum boundary is dropped in favour of the drum boundary. Every boundary snaps to the nearest downbeat. A section shorter than 3.5 beats (a partial bar; snapped downbeat spacing jitters around one bar) merges into its predecessor; if it is the first section, into its successor. Anchor boundaries (drop starts) are never removed: a short section starting at an anchor merges forward instead.
 2. **Labels.** Each section gets exactly one label, by the first matching row:
 
    | # | Section | Label | `drums` |
@@ -136,7 +136,7 @@ So a pop song with a drumless intro or a one-bar drum stop keeps pop labels; a t
    | 5 | Inside a mid-song structural gap of > 8 bars, after the **last** novelty boundary inside the gap | `build` | `absent` |
    | 6 | Starts at an anchor run's start | `drop` | `present` |
    | 7 | First section of the track, drums present (no leading structural gap) | `intro` | `present` |
-   | 8 | Any other drums-present section | label of the preceding section | `present` |
+   | 8 | Any other drums-present section | label of the most recent drums-present section (never a gap label); `drop` if there is none | `present` |
 
    `decaying` for rows 2–4 comes from the gap's decaying flag (see *Drum runs and gaps*); it applies only to the first section of that gap. Section boundaries at a run end are placed at the run's last onset (snapped), not at the silence start.
 3. **Confidence**: 0.9 for EDM labels. The fallback labeller keeps its own confidences (0.4–0.7), unchanged.
