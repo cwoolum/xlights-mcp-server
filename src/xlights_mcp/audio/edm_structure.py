@@ -15,6 +15,8 @@ from xlights_mcp.audio.sections import SongSection
 
 NOVELTY_MERGE_S = 2.0
 BUILD_MAX_BARS = 8
+# Measured last-hit-to-first-kick, an N-bar riser naturally runs up to a beat over.
+BUILD_SLACK_BARS = 0.5
 EDM_CONFIDENCE = 0.9
 
 
@@ -95,7 +97,7 @@ def _gap_label(
         return "intro", "absent"
     if gap.kind == "trailing":
         return "outro", fade
-    if gap.bars <= BUILD_MAX_BARS:
+    if gap.bars <= BUILD_MAX_BARS + BUILD_SLACK_BARS:
         return "build", fade
     inside = [n for n in novelty if gap.start < n < gap.end]
     if inside and start >= _snap(max(inside), downbeats, max_dist):

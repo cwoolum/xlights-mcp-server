@@ -78,6 +78,25 @@ def test_short_mid_gap_is_a_build_and_drums_from_start_is_intro():
     assert sections[0].drums == "present"
 
 
+def test_build_length_allows_half_a_bar_of_slack():
+    # Measured last-hit-to-first-kick, an 8-bar riser naturally runs up to a beat
+    # over: 8.25 bars is within the slack, still a build.
+    sections = _label([(0, 40), (56.0, 90)], 90)
+
+    assert _summary(sections) == [
+        ("intro", 0.0, 40.0),
+        ("build", 40.0, 56.0),
+        ("drop", 56.0, 90.0),
+    ]
+
+
+def test_build_length_beyond_the_slack_is_a_breakdown():
+    # 8.6 bars is past the 0.5-bar slack: reads as a breakdown, not a build.
+    sections = _label([(0, 40), (56.7, 90)], 90)
+
+    assert [s.label for s in sections] == ["intro", "breakdown", "drop"]
+
+
 def test_short_mid_gap_build_is_decaying_when_the_stem_fades():
     sections = _label([(0, 40), (48, 80)], 80, decay_s=2.0)
 
