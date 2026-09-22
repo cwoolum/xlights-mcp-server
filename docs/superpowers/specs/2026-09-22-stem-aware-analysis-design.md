@@ -17,11 +17,11 @@ Reference track for all numbers below: `E:\XLights\HalloweenShow\Music\GhostsnSt
 ## Goals
 
 1. Beat grid locked to the drum stem when stems exist; bar 1 lands on each drop.
-2. Section labels derived from drum presence, with an EDM vocabulary; pop songs keep the current labeller.
+2. Section labels derived from drum presence, with an EDM vocabulary, for tracks that have at least one structural drum gap (defined below). Tracks without one keep the current labeller.
 3. Per-stem data reachable through a tool, sized for an LLM.
 4. Everything degrades to today's behaviour when stems are unavailable, and says so.
 
-Non-goals: changes to `create_sequence` output (PR B), `get_beat_map` / `get_energy_profile` size fixes (PR C, #6 #7).
+Non-goals: new `create_sequence` behaviour for the new labels (PR B), `get_beat_map` / `get_energy_profile` size fixes (PR C, #6 #7).
 
 ## Pipeline
 
@@ -29,8 +29,8 @@ Non-goals: changes to `create_sequence` output (PR B), `get_beat_map` / `get_ene
 
 1. spectrum
 2. stems — separate, then `analyze_stems` (now also computes `silences`)
-3. beats — receives drum onsets and drum silences, or `None`
-4. structure — receives the drum stem analysis and the beat map, or `None`
+3. beats — receives the drum `StemOnsets`, or `None`
+4. structure — receives the drum `StemOnsets` and the beat map, or `None`
 
 Progress still reports 5 stages, in the new order. If separation or stem analysis fails, stages 3–4 receive `None` and behave exactly as today.
 
@@ -42,9 +42,7 @@ Progress still reports 5 stages, in the new order. If separation or stem analysi
 silences: list[tuple[float, float]]  # seconds, [start, end)
 ```
 
-A silence is a span where the stem's normalised RMS stays below `SILENCE_THRESHOLD = 0.05` for at least `MIN_SILENCE_S = 1.0`. Computed once in `analyze_stems` for every stem. Every consumer (beat re-anchoring, structure, `get_stem_events`, the `analyze_song` summary) reads this list; none re-derives silence.
-
-**Drum runs** are the complement of the drum stem's silences within `[0, duration]`. A run's *start* is the first drum onset at or after the silence end. A run's *end* is the last drum onset before the next silence begins. Runs with no onsets are discarded.
+A silence is a span where the stem's normalised RMS stays below `SILENCE_THRESHOLD = 0.05` for at least `MIN_SILENCE_S = 1.0`. Computed once in `analyze_stems` for every stem.
 
 `BeatMap` (audio/beats.py) gains:
 
@@ -63,49 +61,91 @@ drums: Literal["present", "absent", "decaying"] | None = None  # None when struc
 
 `cache.ANALYSIS_VERSION` goes from 1 to 2. Old JSON entries are ignored; stem WAVs on disk are reused, so re-analysis costs ~10 s, not ~50 s.
 
+## Drum runs and gaps (shared definitions)
+
+One new module, `audio/drums.py`, owns these definitions. `beats.py` and `structure.py` both call it; neither re-derives them.
+
+```python
+def drum_runs(drums: StemOnsets, beat_period: float) -> list[DrumRun]
+def drum_gaps(runs: list[DrumRun], duration: float) -> list[DrumGap]
+```
+
+- **Raw run**: a maximal stretch between two consecutive drum `silences` (or track start/end) that contains at least one drum onset. `start` = first onset in it, `end` = last onset in it.
+- **Run** (the only kind anything else uses): a raw run whose `end - start ≥ 4 * beat_period` (at least one bar). Shorter raw runs — an isolated crash or tom hit — are discarded and their time is treated as part of the surrounding gap.
+- **Gap**: the interval between one run's `end` and the next run's `start`, plus the leading gap `[0, first run start)` and the trailing gap `(last run end, duration]`. Gap length is measured on this interval (last onset to next first onset), in seconds and in bars (`length / (4 * beat_period)`).
+- **Structural gap**: a gap of ≥ 4 s. Gaps shorter than 4 s (a one-bar drum stop) are not structural: they create no section boundary and no re-anchoring; drums count as present through them.
+- **Decaying**: a structural gap is `decaying` when more than 1 s separates the preceding run's last onset from the start of the drum silence span that follows it (the stem tails off rather than cutting). Otherwise `absent`.
+- **Anchor run**: a run that is preceded by a structural gap (including a leading gap ≥ 4 s).
+
+```python
+class DrumRun(BaseModel):
+    start: float  # first onset, seconds
+    end: float    # last onset, seconds
+
+class DrumGap(BaseModel):
+    start: float
+    end: float
+    bars: float
+    kind: Literal["leading", "mid", "trailing"]
+    structural: bool   # length >= 4 s
+    decaying: bool
+```
+
+`beat_period` is always `60 / tempo` of the **base grid** (step 1 below), which `BeatMap.tempo` keeps; it is not recomputed after snapping. `beats.py` and `structure.py` therefore compute identical runs.
+
+`StemOnsets` moves from `analyzer.py` into a dependency-free `audio/stems_model.py` (re-exported from `analyzer.py` for existing imports), so `drums.py` → `stems_model.py` and `beats.py` → `drums.py` introduce no import cycle.
+
 ## Beat grid
 
-In `detect_beats(audio_path, sr, drum_onsets=None, drum_silences=None)`:
+In `detect_beats(audio_path, sr, drums: StemOnsets | None = None)`:
 
-1. **Base grid.** madmom `RNNDownBeatProcessor` + `DBNDownBeatTrackingProcessor(beats_per_bar=[4], fps=100)` if madmom imports; otherwise librosa `beat_track`. madmom's bar positions are discarded. `beat_source` records which ran. Tempo = 60 / median inter-beat interval.
-2. **Snap** (only when `drum_onsets` given). Each beat moves to the nearest drum onset within ±60 ms. Beats with no drum onset in range keep their position.
-3. **Re-anchor downbeats** (only when drum runs exist). For each drum run, the snapped beat nearest its start is beat 1; every 4th beat after it is a downbeat until the next run's anchor. Beats before the first run count backwards from the first anchor, so the intro and first riser keep a bar grid consistent with drop 1.
-4. `drum_aligned = True` when steps 2–3 ran.
-5. `onset_times` stays the mixdown onsets. Per-stem onsets are served by `get_stem_events`.
+1. **Base grid.** madmom `RNNDownBeatProcessor` + `DBNDownBeatTrackingProcessor(beats_per_bar=[4], fps=100)` if madmom imports; otherwise librosa `beat_track`. `beat_source` records which ran. Tempo = 60 / median inter-beat interval. Base downbeats: madmom's bar-position-1 beats, or every 4th beat from the first beat for librosa (today's behaviour).
+2. **Snap** (only when `drums` given). Each beat moves to the nearest drum onset within ±60 ms. Beats with no drum onset in range keep their position.
+3. **Re-anchor downbeats** (only when at least one anchor run exists). For each anchor run, the snapped beat nearest its `start` becomes a downbeat; every 4th beat after it is a downbeat until the next anchor. Beats before the first anchor are counted backwards from it in steps of 4. Where the count from one anchor meets the next anchor mid-bar, the shorter partial bar before the new anchor is intended (drops are placed against the phrase, not the previous bar count).
+4. When no anchor run exists (steady drums, or no drum onsets), downbeats stay as in step 1. Snapping still applies.
+5. `drum_aligned = True` when step 2 ran.
+6. `onset_times` stays the mixdown onsets. Per-stem onsets are served by `get_stem_events`.
 
-Measured on the reference track: madmom beats land within +7 / −16 / +22 ms of the three drum events but its downbeats are 438–467 ms off at both drops, which is why step 3 overrides bar phase regardless of source.
+Measured on the reference track: madmom beats land within +7 / −16 / +22 ms of the three drum events but its downbeats are 438–467 ms off at both drops, which is why step 3 overrides bar phase at anchors regardless of source.
 
 ## Structure
 
-With the drum stem available (`structure_source = "stems"`):
+`detect_structure(audio_path, sr, drums: StemOnsets | None = None, beats: BeatMap | None = None)`.
 
-1. **Boundaries.** Candidates are drum-run starts, drum-run ends, and the existing novelty/energy boundaries. A novelty boundary within 2 s of a drum boundary is dropped in favour of the drum boundary. Every boundary then snaps to the nearest downbeat. Sections shorter than one bar merge into their predecessor.
-2. **Labels**, assigned per section by drum state, position and energy:
+### Mode selection
 
-   | Condition | Label | `drums` |
-   |---|---|---|
-   | Before the first drum run | `intro` | `absent` |
-   | First section, drums present from the start (no leading silence) | `intro` | `present` |
-   | Mid-song drum gap of ≤ 8 bars | `build` | `absent`, or `decaying` (see below) |
-   | Mid-song drum gap of > 8 bars | `breakdown`; if a novelty/energy boundary falls inside the gap, the part after it is `build` | `breakdown`: `decaying` or `absent`; `build`: `absent` |
-   | Starts at a drum-run start that follows ≥ 4 s of drum silence | `drop` | `present` |
-   | After the last drum run | `outro` | `absent` or `decaying` |
-   | Drums present, none of the above (e.g. second half of a long drop) | inherits the preceding section's label | `present` |
+| Condition | Mode | `structure_source` |
+|---|---|---|
+| `drums` is `None` | today's algorithm | `mixdown`, `drums = None` |
+| drum stem present, and at least one structural gap lies strictly between two runs | EDM labelling (below) | `stems` |
+| otherwise (no runs, steady drums, only leading/trailing silence, or only short stops) | today's labeller for boundaries and labels; per section, `drums = "present"` if runs cover more than half of it, else `"absent"` | `stems` |
 
-   A gap section is `decaying` when more than 1 s separates the run's last drum onset from the start of the silence span (the stem tails off rather than cutting). The section boundary is always the last onset, not the silence start.
+So a pop song with a drumless intro or a one-bar drum stop keeps pop labels; a track whose drums drop out for ≥ 4 s mid-song gets EDM labels. Known consequence, accepted: a pop song with a drumless bridge of ≥ 4 s is labelled EDM-style (choruses as `drop`, the bridge as `breakdown`).
 
-   On the reference track the ~10 s gap before drop 1 (≈ 5 bars) is a `build`; the ~30 s gap from 110.086 s (≈ 16 bars) is a `breakdown`, with a trailing `build` if novelty marks the riser.
+### EDM labelling
 
-3. **Pop fallback.** If the drum stem has no silences between its first and last onset (drums steady throughout), use today's repetition labeller for labels, keep the drum-derived boundaries, and set `drums` per section from the stem.
-4. `confidence` = 0.9 for drum-derived labels, 0.65 for fallback labels (unchanged).
+1. **Boundaries.** Candidates are every run start and run end adjacent to a structural gap, plus the existing novelty/energy boundaries. A novelty boundary within 2 s of a drum boundary is dropped in favour of the drum boundary. Every boundary snaps to the nearest downbeat. A section shorter than one bar merges into its predecessor; if it is the first section, into its successor.
+2. **Labels.** Each section gets exactly one label, by the first matching row:
 
-Without stems: today's algorithm, `structure_source = "mixdown"`, `drums = None`.
+   | # | Section | Label | `drums` |
+   |---|---|---|---|
+   | 1 | Inside the leading structural gap | `intro` | `absent` |
+   | 2 | Inside the trailing structural gap | `outro` | `absent` or `decaying` |
+   | 3 | Inside a mid-song structural gap of ≤ 8 bars | `build` | `absent` or `decaying` |
+   | 4 | Inside a mid-song structural gap of > 8 bars, before or with no novelty boundary inside the gap | `breakdown` | `absent` or `decaying` |
+   | 5 | Inside a mid-song structural gap of > 8 bars, after the **last** novelty boundary inside the gap | `build` | `absent` |
+   | 6 | Starts at an anchor run's start | `drop` | `present` |
+   | 7 | First section of the track, drums present (no leading structural gap) | `intro` | `present` |
+   | 8 | Any other drums-present section | label of the preceding section | `present` |
 
-Expected on the reference track: `intro, build, drop, …, breakdown, build, drop, …, outro`, with drop 1 starting at the downbeat nearest 66.873 s, breakdown at the downbeat nearest 110.086 s (`drums = "decaying"`), drop 2 at the downbeat nearest 140.388 s.
+   `decaying` for rows 2–4 comes from the gap's decaying flag (see *Drum runs and gaps*); it applies only to the first section of that gap. Section boundaries at a run end are placed at the run's last onset (snapped), not at the silence start.
+3. **Confidence**: 0.9 for EDM labels. The fallback labeller keeps its own confidences (0.4–0.7), unchanged.
+
+Expected on the reference track: drums play from the start (row 7 `intro`, then row 8 continues it), a ~10 s gap (≈ 5 bars) → `build`, drop 1 at the downbeat nearest 66.873 s, row 8 continues `drop`, breakdown from the downbeat nearest 110.086 s (≈ 16-bar gap, `decaying`), a trailing `build` if novelty marks the riser, drop 2 at the downbeat nearest 140.388 s, then `outro` if the drums stop ≥ 4 s before the end.
 
 ### Engine compatibility
 
-`SECTION_TYPE_CONFIG` in sequencer/engine.py gains three aliases so `create_sequence` output is unchanged by this PR: `build` → `transition` config, `drop` → `chorus` config, `breakdown` → `bridge` config.
+`SECTION_TYPE_CONFIG` in sequencer/engine.py gains three aliases so no new label falls through to `unknown`: `build` → `transition` config, `drop` → `chorus` config, `breakdown` → `bridge` config. `create_sequence` output will change where labels, boundaries and downbeats change; no new generation behaviour is added.
 
 ## Tool surface
 
@@ -116,12 +156,14 @@ Expected on the reference track: `intro, build, drop, …, breakdown, build, dro
 "drum_aligned": true,
 "structure_source": "stems",
 "stems": {
-  "drums":  {"onsets": 533, "mean_energy": 0.41, "silences_ms": [[57100, 66870], [110090, 140380]]},
+  "drums":  {"onsets": 533, "mean_energy": 0.41, "silences_ms": [[57120, 66850], [113200, 140360]]},
   "bass":   {"onsets": 156, "mean_energy": 0.33, "silences_ms": [...]},
   "vocals": {"onsets": 415, "mean_energy": 0.22, "silences_ms": [...]},
   "other":  {"onsets": 190, "mean_energy": 0.37, "silences_ms": [...]}
 }
 ```
+
+(Numbers illustrative. The drum silence after the breakdown starts ~3 s after the last onset at 110.086 s because the hi-hat decays, which is what makes that gap `decaying`.)
 
 `stems` is `null` when stems are unavailable. Each section entry gains `drums`. All times in this block are integer milliseconds. No file paths are returned.
 
@@ -133,11 +175,12 @@ get_stem_events(mp3_path: str, stem: str, kind: str,
                 max_events: int = 500, resolution: str = "beat") -> dict
 ```
 
-- `stem` ∈ `drums | bass | vocals | other`; `kind` ∈ `onsets | energy | silences`. Invalid values return `{"error": ...}` listing the valid ones.
+- `stem` ∈ `drums | bass | vocals | other`; `kind` ∈ `onsets | energy | silences`; `resolution` ∈ `beat | bar` (used only by `energy`). Invalid values return `{"error": ...}` listing the valid ones.
 - Window `[start_ms, end_ms)` defaults to the whole track.
-- `onsets` → `{"stem", "kind", "count", "events_ms": [int, ...]}`. If more than `max_events` fall in the window, return the first `max_events`, plus `"truncated": true` and `"next_start_ms"`.
-- `energy` → `{"stem", "kind", "resolution", "points": [{"t_ms": int, "energy": float (3 dp)}]}`. `resolution="beat"` gives one mean value per beat of the (re-phased) grid; `"bar"` one per downbeat-to-downbeat span. `max_events` truncation applies to points.
+- `onsets` → `{"stem", "kind", "count", "events_ms": [int, ...]}`.
+- `energy` → `{"stem", "kind", "resolution", "points": [{"t_ms": int, "energy": float (3 dp)}]}`. `beat`: one mean value per beat span `[beat_i, beat_{i+1})` of the re-phased grid; `bar`: one per `[downbeat_i, downbeat_{i+1})`. The last span ends at track end. A span is included when its start is in the window.
 - `silences` → `{"stem", "kind", "spans_ms": [[start, end], ...]}`, clipped to the window.
+- Truncation (`onsets` events and `energy` points): if more than `max_events` fall in the window, return the first `max_events`, plus `"truncated": true` and `"next_start_ms"` (time of the first omitted item).
 - Served from the analysis cache; runs `full_analysis` (with progress) on a cache miss, the same way `get_beat_map` does.
 - If stems are unavailable: `{"error": "Stem analysis unavailable. Install with: uv pip install -e \".[separation]\""}`.
 
@@ -155,23 +198,24 @@ get_stem_events(mp3_path: str, stem: str, kind: str,
 
 ## Testing
 
-Unit tests use synthetic signals and fixtures; no audio files are added to the repo.
+Unit tests use synthetic signals and fixtures; no audio files are added to the repo. Synthetic grids use 120 BPM (0.5 s beats, 2 s bars).
 
 - **Silences**: energy curve with a known 3 s gap → one span within ±1 frame; a 0.5 s dip → no span.
-- **Drum runs**: silences + onsets → expected run starts/ends; a run with no onsets is discarded.
+- **Drum runs/gaps**: silences + onsets → expected runs; a single-onset raw run is discarded; a 2 s stop is a non-structural gap; decaying flag set when the silence starts > 1 s after the last onset.
 - **Snap**: grid 45 ms late against onsets → every beat within 1 ms of its onset; a beat with the nearest onset 100 ms away is unchanged.
-- **Re-anchor**: two runs whose starts fall on beat 3 and beat 2 of the base grid's count → the beat at each run start is a downbeat, and downbeats repeat every 4 beats until the next anchor; beats before the first run have downbeats counted backwards.
-- **Beat fallback**: no drum data → `drum_aligned = False`, grid equals base grid.
-- **Structure** (120 BPM synthetic grid, 2 s bars), boundaries asserted on downbeats:
-  - silent 0–20 s, run 20–60 s, gap 60–80 s (10 bars, 2 s decay), run 80–120 s, silent after → `intro, drop, breakdown (decaying), drop, outro`.
+- **Re-anchor**: two anchor runs whose starts fall on beat 3 and beat 2 of the base count → each start is a downbeat, downbeats every 4 beats until the next anchor, backwards count before the first. An isolated crash inside a gap does not reset phase. No anchor runs → base downbeats unchanged.
+- **Structure** (boundaries asserted on downbeats):
+  - silent 0–20 s, run 20–60 s, gap 60–80 s (10 bars, decaying), run 80–120 s, silent 120–130 s → `intro, drop, breakdown (decaying), drop, outro`.
   - same, with a novelty boundary injected at 72 s → `intro, drop, breakdown, build, drop, outro`.
+  - same, with novelty boundaries at 66 s and 72 s → `intro, drop, breakdown, breakdown, build, drop, outro` (only the last starts `build`).
   - drums from 0 s, gap 40–48 s (4 bars), run to end → `intro (present), build, drop`.
-  - steady drums throughout → fallback labels, `structure_source = "stems"`.
+  - drums from 0 s with a 2 s stop at 40 s → fallback labeller, `structure_source = "stems"`.
+  - drum stem with no onsets → fallback labeller, all `drums = "absent"`.
   - no stems → `structure_source = "mixdown"`, `drums = None`.
 - **Engine**: every label in the vocabulary resolves in `SECTION_TYPE_CONFIG`.
-- **Tool**: window clipping; truncation sets `next_start_ms`; `energy` beat resolution yields one point per beat in the window; bar resolution one per bar; invalid `stem`/`kind` errors; stems unavailable errors.
-- **Cache**: version bump — a v1 entry is not loaded.
+- **Tool**: window clipping; truncation sets `next_start_ms` for onsets and energy; `beat` resolution yields one point per beat starting in the window, `bar` one per bar; invalid `stem`/`kind`/`resolution` errors; stems unavailable errors.
+- **Cache**: a v1 entry is not loaded.
 
-Manual integration check (not in CI), on the reference track: drops start on downbeats within 30 ms of 66.873 s and 140.388 s; breakdown starts within one beat of 110.086 s with `drums = "decaying"`; labels read intro → build → drop … breakdown → build → drop … outro.
+Manual integration check (not in CI), on the reference track: drops start on downbeats within 30 ms of 66.873 s and 140.388 s; breakdown starts within one beat of 110.086 s with `drums = "decaying"`; labels read intro → build → drop … breakdown (→ build) → drop … (outro).
 
 All existing tests must still pass.
