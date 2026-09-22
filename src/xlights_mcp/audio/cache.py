@@ -21,13 +21,20 @@ logger = logging.getLogger(__name__)
 ANALYSIS_VERSION = 3
 
 
+def file_content_hash(path: Path) -> str:
+    """SHA1 hex digest of a file's raw bytes."""
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def cache_key(audio_path: Path) -> str:
     """Content hash of the audio file, combined with the analysis version."""
     h = hashlib.sha1()
     h.update(f"v{ANALYSIS_VERSION}:".encode())
-    with open(audio_path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
+    h.update(file_content_hash(audio_path).encode())
     return h.hexdigest()
 
 

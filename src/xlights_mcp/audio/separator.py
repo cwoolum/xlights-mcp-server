@@ -7,6 +7,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from xlights_mcp.audio.cache import file_content_hash
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,7 +50,9 @@ def separate_stems(
         output_dir = audio_path.parent / "stems" / audio_path.stem
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check cache — vocals is the minimum required stem
+    # Check cache — vocals is the minimum required stem. A sidecar hash of the
+    # source audio's content guards against reusing stems for a different file
+    # that happens to share this file's name/path.
     stems = StemPaths(available=True)
     expected = {
         "vocals": output_dir / "vocals.wav",
@@ -56,15 +60,20 @@ def separate_stems(
         "bass": output_dir / "bass.wav",
         "other": output_dir / "other.wav",
     }
+    sidecar = output_dir / "source.sha1"
+    source_hash = file_content_hash(audio_path)
 
     vocals_cached = expected["vocals"].exists()
-    if vocals_cached:
+    sidecar_matches = sidecar.exists() and sidecar.read_text().strip() == source_hash
+    if vocals_cached and sidecar_matches:
         logger.info("Using cached stems")
         stems.vocals = str(expected["vocals"])
         for name in ("drums", "bass", "other"):
             if expected[name].exists():
                 setattr(stems, name, str(expected[name]))
         return stems
+    if vocals_cached and not sidecar_matches:
+        logger.info("Cached stems' source audio changed; re-separating")
 
     logger.info(f"Separating stems with {model}: {audio_path}")
 
@@ -116,6 +125,7 @@ def separate_stems(
                     shutil.move(str(src), str(dst))
                     setattr(stems, stem_name, str(dst))
 
+        sidecar.write_text(source_hash)
         logger.info(f"Stems saved to {output_dir}")
     except Exception as e:
         logger.error(f"Stem separation failed: {e}")
