@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from xlights_mcp.audio.beats import BeatMap, detect_beats
 from xlights_mcp.audio.cache import load_cached, save_cached
+from xlights_mcp.audio.drums import find_silences
 from xlights_mcp.audio.separator import StemPaths, separate_stems
 from xlights_mcp.audio.spectrum import SpectrumAnalysis, analyze_spectrum
 from xlights_mcp.audio.stems_model import StemAnalysis, StemOnsets
@@ -170,6 +171,9 @@ def analyze_stems(stem_paths: StemPaths, sr: int = 22050) -> StemAnalysis:
                 energy=normalized_rms,
                 energy_times=rms_times,
                 mean_energy=mean_energy,
+                silences=find_silences(
+                    np.asarray(normalized_rms), np.asarray(rms_times), end=len(y) / loaded_sr
+                ),
             )
             logger.info(f"  Stem '{name}': {len(onset_times)} onsets, mean energy {mean_energy:.2f}")
 

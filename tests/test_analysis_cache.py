@@ -70,3 +70,17 @@ def test_force_bypasses_cache(click_track: Path, tmp_path: Path):
 
     again = full_analysis(click_track, config, force=True)
     assert again.cached is False
+
+
+def test_cache_ignores_entries_written_by_the_previous_version(
+    click_track: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from xlights_mcp.audio import cache
+    from xlights_mcp.audio.analyzer import SongAnalysis
+
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(cache, "ANALYSIS_VERSION", 1)
+    cache.save_cached(SongAnalysis(file_path=str(click_track), file_name="click.wav"), click_track, cache_dir)
+    monkeypatch.undo()
+
+    assert cache.load_cached(click_track, cache_dir) is None
