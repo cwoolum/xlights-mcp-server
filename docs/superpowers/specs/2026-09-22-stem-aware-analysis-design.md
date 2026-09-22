@@ -70,7 +70,7 @@ def drum_runs(drums: StemOnsets, beat_period: float) -> list[DrumRun]
 def drum_gaps(runs: list[DrumRun], duration: float) -> list[DrumGap]
 ```
 
-- **Raw run**: a maximal stretch between two consecutive drum `silences` (or track start/end) that contains at least one drum onset. `start` = first onset in it, `end` = last onset in it.
+- **Raw run**: a maximal stretch between two consecutive drum `silences` (or track start/end) that contains at least one drum onset. `start` = first onset in it, `end` = last onset in it. **Pickup trimming:** if the stretch opens with onsets that have no kick (drum-stem energy below 150 Hz, `StemOnsets.onset_bass` < 0.3) and a kick follows within the first bar, `start` is the first kick — drops are commonly preceded by a hi-hat/snare pickup fill that is not the downbeat.
 - **Run** (the only kind anything else uses): a raw run whose `end - start ≥ 4 * beat_period` (at least one bar). Shorter raw runs — an isolated crash or tom hit — are discarded and their time is treated as part of the surrounding gap.
 - **Gap**: the interval between one run's `end` and the next run's `start`, plus the leading gap `[0, first run start)` and the trailing gap `(last run end, duration]`. Gap length is measured on this interval (last onset to next first onset), in seconds and in bars (`length / (4 * beat_period)`).
 - **Structural gap**: a gap of ≥ 4 s. Gaps shorter than 4 s (a one-bar drum stop) are not structural: they create no section boundary and no re-anchoring; drums count as present through them.
@@ -107,6 +107,19 @@ In `detect_beats(audio_path, sr, drums: StemOnsets | None = None)`:
 6. `onset_times` stays the mixdown onsets. Per-stem onsets are served by `get_stem_events`.
 
 Measured on the reference track: madmom beats land within +7 / −16 / +22 ms of the three drum events but its downbeats are 438–467 ms off at both drops, which is why step 3 overrides bar phase at anchors regardless of source.
+
+### Known limitation: bar phase is a best guess
+
+Validated on four songs (2026-09-22). Beats themselves are reliable on EDM (0–25 ms after drum snapping), but no audio-only rule recovered bar phase on every song:
+
+| Song | Ground truth | First onset | First kick (chosen) | Kick + loudest cymbal | madmom phase |
+|---|---|---|---|---|---|
+| Ghosts 'n' Stuff | drops by ear | −2 beats | −1 beat | exact | off (beat 4 / beat 2) |
+| Carnival XMAS | none (drops must share a phase) | consistent | consistent | inconsistent | — |
+| Remains of the Day | hand-labelled Bars/Beats | 1% of bars | 22% | 4% | 77% before 116 s, ~5% after (beat grid itself drifts) |
+| Deck the Halls Remix | phrase taps only | inconclusive | inconclusive | inconclusive | — |
+
+First kick is never worse than first onset and was chosen for this change. Reliable bar phase needs ground truth: a follow-up will use a song's existing Bars/Beats timing track from the user's own sequence when present, plus a ±N-beat downbeat override.
 
 ## Structure
 
@@ -216,6 +229,6 @@ Unit tests use synthetic signals and fixtures; no audio files are added to the r
 - **Tool**: window clipping; truncation sets `next_start_ms` for onsets and energy; `beat` resolution yields one point per beat starting in the window, `bar` one per bar; invalid `stem`/`kind`/`resolution` errors; stems unavailable errors.
 - **Cache**: a v1 entry is not loaded.
 
-Manual integration check (not in CI), on the reference track: drops start on downbeats within 30 ms of 66.873 s and 140.388 s; breakdown starts within one beat of 110.086 s with `drums = "decaying"`; labels read intro → build → drop … breakdown (→ build) → drop … (outro).
+Manual integration check (not in CI), on the reference track: each drop starts on a downbeat within one beat (≤ ~470 ms) of 66.873 s and 140.388 s, and no earlier than the first kick; breakdown starts within one beat of 110.086 s with `drums = "decaying"`; labels read intro → build → drop … breakdown (→ build) → drop … (outro).
 
 All existing tests must still pass.
