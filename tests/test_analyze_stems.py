@@ -33,6 +33,5 @@ def test_analyze_stems_records_drum_silence(tmp_path: Path):
     silences = result.stems["drums"].silences
     assert len(silences) == 1
     start, end = silences[0]
-    print(f"detected silence span: ({start!r}, {end!r})")
     assert 2.0 <= start <= 2.5
     assert 4.3 <= end <= 4.6

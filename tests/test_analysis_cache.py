@@ -81,6 +81,7 @@ def test_cache_ignores_entries_written_by_the_previous_version(
     cache_dir = tmp_path / "cache"
     monkeypatch.setattr(cache, "ANALYSIS_VERSION", 1)
     cache.save_cached(SongAnalysis(file_path=str(click_track), file_name="click.wav"), click_track, cache_dir)
+    assert cache.load_cached(click_track, cache_dir) is not None
     monkeypatch.undo()
 
     assert cache.load_cached(click_track, cache_dir) is None

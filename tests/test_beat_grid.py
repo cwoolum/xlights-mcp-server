@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -47,6 +49,77 @@ def test_anchor_nearest_beat_is_used_when_anchor_is_between_beats():
     downbeats = anchor_downbeats(beats, [3.02])
 
     assert downbeats[0:3] == [1.0, 3.0, 5.0]
+
+
+def test_anchor_downbeats_with_no_beats_returns_empty_list():
+    assert anchor_downbeats([], [1.0]) == []
+
+
+def test_anchor_downbeats_with_no_anchors_raises():
+    with pytest.raises(ValueError, match="anchor_downbeats needs at least one anchor"):
+        anchor_downbeats([0.0, 0.5, 1.0], [])
+
+
+def _install_fake_madmom(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    rnn_error: Exception | None = None,
+    dbn_result: np.ndarray | None = None,
+    dbn_calls: list[dict] | None = None,
+) -> None:
+    """Install a fake madmom.features.downbeats module tree in sys.modules."""
+
+    class FakeRNNDownBeatProcessor:
+        def __call__(self, _path: str) -> str:
+            if rnn_error is not None:
+                raise rnn_error
+            return "activations"
+
+    class FakeDBNDownBeatTrackingProcessor:
+        def __init__(self, **kwargs):
+            if dbn_calls is not None:
+                dbn_calls.append(kwargs)
+
+        def __call__(self, _activations: str) -> np.ndarray:
+            return dbn_result
+
+    madmom_mod = types.ModuleType("madmom")
+    features_mod = types.ModuleType("madmom.features")
+    downbeats_mod = types.ModuleType("madmom.features.downbeats")
+    downbeats_mod.RNNDownBeatProcessor = FakeRNNDownBeatProcessor
+    downbeats_mod.DBNDownBeatTrackingProcessor = FakeDBNDownBeatTrackingProcessor
+    features_mod.downbeats = downbeats_mod
+    madmom_mod.features = features_mod
+
+    monkeypatch.setitem(sys.modules, "madmom", madmom_mod)
+    monkeypatch.setitem(sys.modules, "madmom.features", features_mod)
+    monkeypatch.setitem(sys.modules, "madmom.features.downbeats", downbeats_mod)
+
+
+def test_madmom_grid_returns_beats_and_bar_one_indices(monkeypatch: pytest.MonkeyPatch):
+    calls: list[dict] = []
+    _install_fake_madmom(
+        monkeypatch,
+        dbn_result=np.array([[0.5, 1], [1.0, 2], [1.5, 3], [2.0, 4], [2.5, 1]]),
+        dbn_calls=calls,
+    )
+
+    result = beats_module._madmom_grid(Path("song.wav"))
+
+    assert result == ([0.5, 1.0, 1.5, 2.0, 2.5], [0, 4])
+    assert calls == [{"beats_per_bar": [4], "fps": 100}]
+
+
+def test_madmom_grid_returns_none_when_rnn_processor_fails(monkeypatch: pytest.MonkeyPatch):
+    _install_fake_madmom(monkeypatch, rnn_error=RuntimeError("boom"))
+
+    assert beats_module._madmom_grid(Path("song.wav")) is None
+
+
+def test_madmom_grid_returns_none_when_dbn_result_is_empty(monkeypatch: pytest.MonkeyPatch):
+    _install_fake_madmom(monkeypatch, dbn_result=np.empty((0, 2)))
+
+    assert beats_module._madmom_grid(Path("song.wav")) is None
 
 
 @pytest.fixture
@@ -96,3 +169,35 @@ def test_detect_beats_uses_madmom_grid_when_available(click_track: Path, monkeyp
     assert result.beat_source == "madmom"
     assert result.downbeat_times == [0.5, 2.5]
     assert result.tempo == pytest.approx(120)
+
+
+def test_anchor_dropped_when_beyond_half_a_beat_period_keeps_base_downbeats(
+    click_track: Path, monkeypatch
+):
+    grid = np.arange(0, 10, 0.5).tolist()  # 20 beats, 0-9.5s
+    monkeypatch.setattr(beats_module, "_madmom_grid", lambda _p: (grid, list(range(0, 20, 4))))
+    monkeypatch.setattr(beats_module.librosa, "get_duration", lambda **_k: 60.0)
+    # Drum run 50-60s is far past the (mocked, too-short) beat grid: the only
+    # anchor it produces has no nearby beat, so it must be dropped rather than
+    # re-anchoring the whole song onto a beat that doesn't exist.
+    drums = make_drum_stem([(50, 60)], duration=60.0)
+
+    result = detect_beats(click_track, drums=drums)
+
+    assert result.downbeat_times == [grid[i] for i in range(0, 20, 4)]
+
+
+def test_detect_beats_leading_gap_with_two_anchors_reanchors_whole_song(
+    click_track: Path, monkeypatch
+):
+    grid = np.arange(0, 40, 0.5).tolist()  # 80 beats
+    monkeypatch.setattr(beats_module, "_madmom_grid", lambda _p: (grid, list(range(0, 80, 4))))
+    monkeypatch.setattr(beats_module.librosa, "get_duration", lambda **_k: 40.0)
+    # runs 6.5-19.5 and 26.5-39.5: anchors at 6.5 (beat 13) and 26.5 (beat 53)
+    drums = make_drum_stem([(6.5, 20), (26.5, 40)], duration=40.0)
+
+    result = detect_beats(click_track, drums=drums)
+
+    # Backward from anchor 13 (13, 9, 5, 1), forward 13..49, then 53..77.
+    expected_idx = [1, 5, 9] + list(range(13, 53, 4)) + list(range(53, 80, 4))
+    assert result.downbeat_times == [grid[i] for i in expected_idx]

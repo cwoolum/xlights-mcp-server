@@ -68,7 +68,14 @@ def anchor_downbeats(
     Beats before the first anchor are counted backwards from it. The partial bar
     left where one count meets the next anchor is intentional: drops are placed
     against the phrase, not the previous bar count.
+
+    Returns [] when there are no beats. Raises ValueError when there are no
+    anchors — callers with no anchors should pass the base downbeats instead.
     """
+    if not beats:
+        return []
+    if not anchors:
+        raise ValueError("anchor_downbeats needs at least one anchor")
     grid = np.asarray(beats, dtype=float)
     starts = sorted({int(np.argmin(np.abs(grid - a))) for a in anchors})
     idx = set(range(starts[0], -1, -beats_per_bar))
@@ -115,8 +122,17 @@ def detect_beats(audio_path: Path, sr: int = 22050, drums: StemOnsets | None = N
         period = 60.0 / tempo
         runs = drum_runs(drums, beat_period=period, duration=duration)
         anchors = anchor_starts(drum_gaps(runs, drums, duration=duration, beat_period=period))
-        if anchors:
-            downbeat_times = anchor_downbeats(beat_times, anchors)
+        grid_arr = np.asarray(beat_times, dtype=float)
+        valid_anchors = [a for a in anchors if np.min(np.abs(grid_arr - a)) <= period / 2]
+        dropped = len(anchors) - len(valid_anchors)
+        if dropped:
+            logger.info(
+                f"Dropped {dropped} anchor(s) more than half a beat period from the nearest beat"
+            )
+        if valid_anchors:
+            downbeat_times = anchor_downbeats(beat_times, valid_anchors)
+    elif drum_aligned:
+        logger.debug("drum_aligned but tempo is 0; skipping downbeat re-anchoring")
 
     logger.info(
         f"Detected: tempo={tempo:.1f} BPM ({beat_source}), {len(beat_times)} beats, "
