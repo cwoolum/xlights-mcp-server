@@ -14,52 +14,11 @@ from xlights_mcp.audio.beats import BeatMap, detect_beats
 from xlights_mcp.audio.cache import load_cached, save_cached
 from xlights_mcp.audio.separator import StemPaths, separate_stems
 from xlights_mcp.audio.spectrum import SpectrumAnalysis, analyze_spectrum
+from xlights_mcp.audio.stems_model import StemAnalysis, StemOnsets
 from xlights_mcp.audio.structure import SongSection, detect_structure
 from xlights_mcp.config import AudioConfig
 
 logger = logging.getLogger(__name__)
-
-
-class StemOnsets(BaseModel):
-    """Onset and energy analysis for a single audio stem."""
-
-    name: str  # "drums", "bass", "other", "vocals"
-    onset_times: list[float] = Field(default_factory=list)  # seconds
-    energy: list[float] = Field(default_factory=list)  # normalized 0-1 per frame
-    energy_times: list[float] = Field(default_factory=list)  # seconds
-    mean_energy: float = 0.0
-
-
-class StemAnalysis(BaseModel):
-    """Onset and energy analysis for all separated stems."""
-
-    available: bool = False
-    stems: dict[str, StemOnsets] = Field(default_factory=dict)  # name → StemOnsets
-
-    def get_onsets_in_range(self, stem: str, start: float, end: float) -> list[float]:
-        """Get onset times for a stem within a time range."""
-        if stem not in self.stems:
-            return []
-        return [t for t in self.stems[stem].onset_times if start <= t < end]
-
-    def get_mean_energy_in_range(self, stem: str, start: float, end: float) -> float:
-        """Get mean energy for a stem within a time range."""
-        if stem not in self.stems:
-            return 0.0
-        s = self.stems[stem]
-        energies = [e for t, e in zip(s.energy_times, s.energy) if start <= t < end]
-        return float(np.mean(energies)) if energies else 0.0
-
-    def dominant_stem(self, start: float, end: float) -> str:
-        """Return the stem name with highest mean energy in a time range."""
-        best_name = "other"
-        best_energy = 0.0
-        for name, stem in self.stems.items():
-            e = self.get_mean_energy_in_range(name, start, end)
-            if e > best_energy:
-                best_energy = e
-                best_name = name
-        return best_name
 
 
 class SongAnalysis(BaseModel):

@@ -7,31 +7,10 @@ from pathlib import Path
 
 import librosa
 import numpy as np
-from pydantic import BaseModel, Field
+
+from xlights_mcp.audio.sections import SongSection
 
 logger = logging.getLogger(__name__)
-
-
-class SongSection(BaseModel):
-    """A detected section of a song (verse, chorus, bridge, etc.)."""
-
-    label: str  # "intro", "verse", "chorus", "bridge", "outro", "instrumental"
-    start_time: float  # seconds
-    end_time: float  # seconds
-    energy_level: float = 0.0  # 0.0-1.0 average energy
-    confidence: float = 0.0  # detection confidence
-
-    @property
-    def start_time_ms(self) -> int:
-        return int(self.start_time * 1000)
-
-    @property
-    def end_time_ms(self) -> int:
-        return int(self.end_time * 1000)
-
-    @property
-    def duration(self) -> float:
-        return self.end_time - self.start_time
 
 
 def detect_structure(audio_path: Path, sr: int = 22050) -> list[SongSection]:
