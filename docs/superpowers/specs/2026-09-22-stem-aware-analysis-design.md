@@ -36,8 +36,8 @@ Progress still reports 5 stages, in the new order. If separation or stem analysi
 
 ### Caching and robustness
 
-- A result is not written to the analysis cache when separation or stem analysis raised (pending) — today's code catches the exception, logs it, and still caches the resulting `stem_analysis.available = False` result, so a transient separation failure (e.g. an OOM) sticks until the cache entry is manually invalidated or the audio/version key changes. The fix skips `save_cached` for that run so the next call retries separation.
-- Stems on disk are validated against a `source.sha1` content-hash sidecar file next to them, and re-separated when the sidecar is missing or its hash doesn't match the current audio file (pending) — today's cache check only looks for `vocals.wav` on disk, so stale stems from a different (but same-named) audio file are silently reused.
+- `StemPaths` gains a `failed` field, set when Demucs is installed but separation itself raises (a crash, an OOM, a corrupt model download). `full_analysis` skips `save_cached` for that run — logging a warning instead — when `stems.failed`, or when separation succeeded but stem analysis failed for every stem, so a transient failure doesn't get baked permanently into the on-disk cache; the next call retries the stem pipeline. A clean `StemPaths(available=False)` (Demucs simply not installed) is a normal, cacheable result — it isn't a failure.
+- Stems on disk are validated against a `source.sha1` content-hash sidecar file next to them, and re-separated when the sidecar is missing or its hash doesn't match the current audio file — this guards against reusing another file's stems that happen to share a name/path. Stems separated before this sidecar existed have no `source.sha1` yet, so they're re-separated once (~40–50 s per song on GPU) the first time they're touched under the new cache key; the sidecar is written on that pass, and reuse applies normally after.
 
 ## Data model changes
 
@@ -52,7 +52,7 @@ onset_bass: list[float]  # 0-1, per onset — drums stem only
 
 A silence is a span where the stem's normalised RMS stays below `SILENCE_THRESHOLD = 0.05` for at least `MIN_SILENCE_S = 1.0`. Computed once in `analyze_stems` for every stem.
 
-`onset_bass` (pending) is the peak low-frequency (<150 Hz) level just after each onset, normalised 0-1 over the stem, for the drums stem only. It lets `drum_runs` tell a kick (strong low end) from a kickless pickup hit (hi-hat/snare) at the same onset time, which is what pickup trimming (below) depends on.
+`onset_bass` is the peak low-frequency (<150 Hz) level just after each onset, normalised 0-1 over the stem, computed for the drums stem only (the other three stems don't need kick/pickup discrimination, so `onset_bass` is `[]` for them). It lets `drum_runs` tell a kick (strong low end) from a kickless pickup hit (hi-hat/snare) at the same onset time, which is what pickup trimming (below) depends on.
 
 `BeatMap` (audio/beats.py) gains:
 
@@ -69,7 +69,7 @@ structure_source: Literal["stems", "mixdown"] = "mixdown"
 drums: Literal["present", "absent", "decaying"] | None = None  # None when structure_source == "mixdown"
 ```
 
-`cache.ANALYSIS_VERSION` goes from 1 to 3: v2 added `silences`, v3 added `onset_bass`. Old JSON entries are ignored; stem WAVs on disk are reused, so re-analysis costs ~10 s, not ~50 s.
+`cache.ANALYSIS_VERSION` goes from 1 to 3: v2 added `silences`, v3 added `onset_bass`. Old JSON entries are ignored; stem WAVs on disk are normally reused (via the `source.sha1` sidecar above), so re-analysis costs ~10 s, not ~50 s. Exception: stems separated before the sidecar existed on this branch have no `source.sha1` yet, so the first re-analysis after upgrading re-separates them once (~40–50 s per song on GPU); the sidecar gets written on that pass and reuse applies from then on.
 
 ## Drum runs and gaps (shared definitions)
 
@@ -120,7 +120,7 @@ Constants: `SILENCE_THRESHOLD = 0.05`, `MIN_SILENCE_S = 1.0`, `STRUCTURAL_GAP_S 
 
 In `detect_beats(audio_path, sr, drums: StemOnsets | None = None)`:
 
-1. **Base grid.** madmom `RNNDownBeatProcessor` + `DBNDownBeatTrackingProcessor(beats_per_bar=[4], fps=100)` if madmom imports; otherwise librosa `beat_track`. `beat_source` records which ran. Tempo = 60 / median inter-beat interval. Base downbeats: madmom's bar-position-1 beats, or every 4th beat from the first beat for librosa (today's behaviour). If madmom runs but returns beats with none marked bar-position 1, that also falls back to every 4th beat from the first beat (pending), rather than producing an empty downbeat list.
+1. **Base grid.** madmom `RNNDownBeatProcessor` + `DBNDownBeatTrackingProcessor(beats_per_bar=[4], fps=100)` if madmom imports; otherwise librosa `beat_track`. `beat_source` records which ran. Tempo = 60 / median inter-beat interval. Base downbeats: madmom's bar-position-1 beats, or every 4th beat from the first beat for librosa. If madmom runs but returns beats with none marked bar-position 1, that also falls back to every 4th beat from the first beat, rather than leaving `downbeat_idx` empty.
 2. **Snap** (only when `drums` given). Each beat moves to the nearest drum onset within ±60 ms. Beats with no drum onset in range keep their position.
 3. **Re-anchor downbeats** (only when at least one anchor run exists). For each anchor run, the snapped beat nearest its `start` becomes a downbeat; every 4th beat after it is a downbeat until the next anchor. Beats before the first anchor are counted backwards from it in steps of 4. Where the count from one anchor meets the next anchor mid-bar, the shorter partial bar before the new anchor is intended (drops are placed against the phrase, not the previous bar count). An anchor more than half a beat period from its nearest beat (the grid doesn't reach that far, e.g. librosa trimmed edge beats) is dropped; if no anchor remains, step 4 applies.
 4. When no anchor run exists (steady drums, or no drum onsets), downbeats stay as in step 1. Snapping still applies.
@@ -161,7 +161,7 @@ So a pop song with a drumless intro or a one-bar drum stop keeps pop labels; a t
 
 ### EDM labelling
 
-`label_edm_sections(gaps, novelty_times, downbeat_times, duration, beat_period, energy_at)` in `audio/edm_structure.py`. (Its `runs` parameter is unused and is being removed — pending.) `novelty_times` are real novelty-curve peaks only, not the energy-based fallback boundaries `structure.py` substitutes when novelty is too sparse — those would read as spurious `build` boundaries if they landed inside a drum gap.
+`label_edm_sections(gaps, novelty_times, downbeat_times, duration, beat_period, energy_at)` in `audio/edm_structure.py`. `novelty_times` are real novelty-curve peaks only, not the energy-based fallback boundaries `structure.py` substitutes when novelty is too sparse — those would read as spurious `build` boundaries if they landed inside a drum gap.
 
 1. **Boundaries.** Candidates are every run start and run end adjacent to a structural gap, plus the existing novelty/energy boundaries. A novelty boundary within 2 s of a drum boundary is dropped in favour of the drum boundary. Every boundary snaps to the nearest downbeat within half a bar; a boundary with no downbeat that close (the grid has a hole) keeps its raw time. A section shorter than 3.5 beats (a partial bar; snapped downbeat spacing jitters around one bar) merges into its predecessor; if it is the first section, into its successor. Anchor boundaries (drop starts) are never removed: a short section starting at an anchor merges forward instead, and is left short if its end is also an anchor or the track end.
 2. **Labels.** Each section gets exactly one label, by the first matching row:
@@ -221,7 +221,7 @@ get_stem_events(mp3_path: str, stem: str, kind: str,
 - `silences` → `{"stem", "kind", "spans_ms": [[start, end], ...]}`, clipped to the window.
 - Truncation (`onsets` events and `energy` points): if more than `max_events` fall in the window, return the first `max_events`, plus `"truncated": true` and `"next_start_ms"` (time of the first omitted item).
 - Served from the analysis cache; runs `full_analysis` (with progress) on a cache miss, the same way `get_beat_map` does.
-- Errors, all returned before any analysis runs: invalid `stem`, `kind`, or `resolution`; `max_events < 1`; a negative or inverted (`start_ms > end_ms`) window. If stems are unavailable: `{"error": "Stem analysis unavailable. Install with: uv pip install -e \".[separation]\""}` — that message will also suggest re-running `analyze_song` with `force=true`, for the case where a file was analyzed before stems were installed (pending). If stems ran but the requested stem wasn't among them: `{"error": "Stem '<stem>' was not analyzed for this song. Available: <list>"}`.
+- Errors, all returned before any analysis runs: invalid `stem`, `kind`, or `resolution`; `max_events < 1`; a negative or inverted (`start_ms > end_ms`) window. If stems are unavailable: `{"error": "Stem analysis unavailable. Install with: uv pip install -e \".[separation]\" or re-run analyze_song with force=true if separation was installed after this song was analyzed."}` — the `force=true` suggestion covers a song analyzed (and cached) before separation was installed. If stems ran but the requested stem wasn't among them: `{"error": "Stem '<stem>' was not analyzed for this song. Available: <list>"}`.
 
 ## Packaging
 
@@ -241,7 +241,7 @@ get_stem_events(mp3_path: str, stem: str, kind: str,
 
 Unit tests use synthetic signals and fixtures; no audio files are added to the repo. Synthetic grids use 120 BPM (0.5 s beats, 2 s bars).
 
-Tests are hermetic by default: autouse fixtures stub out Demucs separation and madmom so the suite runs without either installed and without network or GPU access (pending — not yet in `tests/conftest.py`). One opt-in test, marked `real_backends`, exercises the real separation/beat-tracking backends when they're installed; it's skipped by default and only runs when explicitly selected (pending — the marker isn't registered in `pyproject.toml` yet). See the README for how to run it.
+Tests are hermetic by default: an autouse fixture in `tests/conftest.py` stubs out Demucs separation (`separate_stems`) and madmom (`_madmom_grid`) so the suite runs without either installed and without network or GPU access. `real_backends` is a registered pytest marker (see `pyproject.toml`), deselected by default via `addopts = "-m 'not real_backends'"`; a test marked with it skips the autouse stub entirely and exercises the real separation/beat-tracking backends when they're installed. Run it explicitly with `pytest -m real_backends`. A second marker, `real_madmom_grid`, lets a test that fakes madmom's output bypass only the `_madmom_grid` stub (not the demucs one), for tests that need to drive `detect_beats` through a realistic madmom-shaped grid without a real madmom install. See the README for how to run the real-backend test.
 
 - **Silences**: energy curve with a known 3 s gap → one span within ±1 frame; a 0.5 s dip → no span.
 - **Drum runs/gaps**: silences + onsets → expected runs; a single-onset raw run is discarded; a 2 s stop is a non-structural gap; decaying flag set when the silence starts > 1 s after the last onset.
