@@ -35,13 +35,15 @@ def stems_summary(analysis: SongAnalysis) -> dict[str, dict] | None:
     }
 
 
-def validate_stem_query(stem: str, kind: str, resolution: str) -> str | None:
+def validate_stem_query(stem: str, kind: str, resolution: str, max_events: int = 500) -> str | None:
     if stem not in VALID_STEMS:
         return f"Unknown stem '{stem}'. Valid: {', '.join(VALID_STEMS)}"
     if kind not in VALID_KINDS:
         return f"Unknown kind '{kind}'. Valid: {', '.join(VALID_KINDS)}"
     if resolution not in VALID_RESOLUTIONS:
         return f"Unknown resolution '{resolution}'. Valid: {', '.join(VALID_RESOLUTIONS)}"
+    if max_events < 1:
+        return "max_events must be >= 1"
     return None
 
 
@@ -54,38 +56,56 @@ def stem_events(
     max_events: int = 500,
     resolution: str = "beat",
 ) -> dict[str, Any]:
-    error = validate_stem_query(stem, kind, resolution)
+    error = validate_stem_query(stem, kind, resolution, max_events)
     if error:
         return {"error": error}
+    if start_ms is not None and end_ms is not None and start_ms > end_ms:
+        return {"error": "start_ms must be <= end_ms"}
+
     sa = analysis.stem_analysis
-    if not sa.available or stem not in sa.stems:
+    if not sa.available:
         return {"error": STEMS_UNAVAILABLE}
+    if stem not in sa.stems:
+        return {
+            "error": f"Stem '{stem}' was not analyzed for this song. Available: {', '.join(sa.stems)}"
+        }
 
     s = sa.stems[stem]
-    lo = (start_ms or 0) / 1000
-    hi = end_ms / 1000 if end_ms is not None else analysis.duration_seconds
+    lo_ms = start_ms or 0
+    hi_ms = end_ms if end_ms is not None else _ms(analysis.duration_seconds)
     base: dict[str, Any] = {"stem": stem, "kind": kind}
 
     if kind == "onsets":
-        events = [_ms(t) for t in s.onset_times if lo <= t < hi]
+        events = [_ms(t) for t in s.onset_times if lo_ms <= _ms(t) < hi_ms]
         base["count"] = len(events)
         return _truncate(base, "events_ms", events, max_events, key=lambda e: e)
 
     if kind == "silences":
-        base["spans_ms"] = [[_ms(max(a, lo)), _ms(min(b, hi))] for a, b in s.silences if b > lo and a < hi]
+        spans_ms = []
+        for a, b in s.silences:
+            a_ms, b_ms = _ms(a), _ms(b)
+            if b_ms > lo_ms and a_ms < hi_ms:
+                spans_ms.append([max(a_ms, lo_ms), min(b_ms, hi_ms)])
+        base["spans_ms"] = spans_ms
         return base
 
     grid = analysis.beats.beat_times if resolution == "beat" else analysis.beats.downbeat_times
-    edges = [*grid, analysis.duration_seconds]
+    if not grid:
+        edges = [0.0, analysis.duration_seconds]
+    elif grid[0] > 0:
+        edges = [0.0, *grid, analysis.duration_seconds]
+    else:
+        edges = [*grid, analysis.duration_seconds]
     times = np.asarray(s.energy_times, dtype=float)
     energy = np.asarray(s.energy, dtype=float)
     points = []
     for a, b in pairwise(edges):
-        if not lo <= a < hi:
+        a_ms = _ms(a)
+        if not lo_ms <= a_ms < hi_ms:
             continue
         mask = (times >= a) & (times < b)
         value = float(energy[mask].mean()) if mask.any() else 0.0
-        points.append({"t_ms": _ms(a), "energy": round(value, 3)})
+        points.append({"t_ms": a_ms, "energy": round(value, 3)})
     base["resolution"] = resolution
     return _truncate(base, "points", points, max_events, key=lambda p: p["t_ms"])
 
