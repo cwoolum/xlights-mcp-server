@@ -315,8 +315,9 @@ async def analyze_song(mp3_path: str, ctx: Context, force: bool = False) -> dict
     """Analyze a music file for light show sequencing.
 
     Performs full audio analysis: beat detection, song structure,
-    frequency spectrum, energy profile, and optionally source separation.
-    Progress is streamed as MCP progress notifications while it runs.
+    frequency spectrum, energy profile, and source separation. Separation is
+    always attempted; it's a no-op when Demucs isn't installed. Progress is
+    streamed as MCP progress notifications while it runs.
 
     Results are cached on disk keyed by file content, so repeat calls (and
     create_sequence on the same file) return instantly. Returns a compact
@@ -366,7 +367,15 @@ async def analyze_song(mp3_path: str, ctx: Context, force: bool = False) -> dict
 
 @mcp.tool()
 async def get_song_structure(mp3_path: str, ctx: Context) -> dict:
-    """Get the verse/chorus/bridge structure of a song.
+    """Get the song's section structure.
+
+    EDM tracks (with a mid-song structural drum gap) are labelled intro/build/
+    drop/breakdown/outro; other tracks get pop-song labels (verse/chorus/
+    bridge/intro/outro/transition/instrumental). Each section's
+    structure_source ("stems"/"mixdown") says whether drum-stem presence drove
+    the labelling, and drums ("present"/"absent"/"decaying", or null when
+    structure_source is "mixdown") says whether the drums were present,
+    absent, or fading out through that section.
 
     Served from the analysis cache when available (see analyze_song).
 
@@ -384,6 +393,11 @@ async def get_song_structure(mp3_path: str, ctx: Context) -> dict:
 @mcp.tool()
 async def get_beat_map(mp3_path: str, ctx: Context) -> dict:
     """Get beat and downbeat timestamps for a song.
+
+    beat_source ("madmom"/"librosa") says which beat tracker produced the
+    grid. drum_aligned says whether it was snapped to drum-stem onsets and
+    re-anchored to bar 1 at structural drum gaps; false means the grid is
+    the plain mixdown-only detection.
 
     Served from the analysis cache when available (see analyze_song).
 
@@ -808,8 +822,8 @@ def _preload_audio_stack() -> None:
         try:
             import demucs.separate  # noqa: F401
             import torch  # noqa: F401
-        except ImportError:
-            pass
+        except Exception as e:  # noqa: BLE001 - a broken demucs/torch install must not abort warm-up
+            logger.debug(f"demucs/torch unavailable, skipping preload: {e}")
 
         sr = 22050
         t = np.arange(sr * 6) / sr
