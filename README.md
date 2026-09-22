@@ -78,7 +78,8 @@ uv pip install -e ".[separation]"
 # Lyrics/singing faces — transcribes vocals for lip-sync animation
 uv pip install -e ".[lyrics]"
 
-# Better beat detection
+# Better beat detection (madmom, built from source — needs a C compiler;
+# on Windows install "Desktop development with C++" from the VS Build Tools)
 uv pip install -e ".[beats]"
 
 # Everything
