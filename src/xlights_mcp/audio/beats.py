@@ -9,6 +9,8 @@ import librosa
 import numpy as np
 from pydantic import BaseModel, Field
 
+from xlights_mcp.audio.drums import BEATS_PER_BAR
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,6 +37,41 @@ class BeatMap(BaseModel):
     def onset_times_ms(self) -> list[int]:
         """Onset times in milliseconds."""
         return [int(t * 1000) for t in self.onset_times]
+
+
+SNAP_TOLERANCE_S = 0.060
+
+
+def snap_beats(beats: list[float], onsets: list[float], tol: float = SNAP_TOLERANCE_S) -> list[float]:
+    """Move each beat to the nearest onset within tol; beats with none in range stay put."""
+    if not onsets:
+        return list(beats)
+    arr = np.sort(np.asarray(onsets, dtype=float))
+    snapped = []
+    for b in beats:
+        i = int(np.searchsorted(arr, b))
+        candidates = arr[max(i - 1, 0) : i + 1]
+        nearest = float(candidates[np.argmin(np.abs(candidates - b))])
+        snapped.append(nearest if abs(nearest - b) <= tol else b)
+    return snapped
+
+
+def anchor_downbeats(
+    beats: list[float], anchors: list[float], beats_per_bar: int = BEATS_PER_BAR
+) -> list[float]:
+    """Downbeats counted from each anchor's nearest beat until the next anchor.
+
+    Beats before the first anchor are counted backwards from it. The partial bar
+    left where one count meets the next anchor is intentional: drops are placed
+    against the phrase, not the previous bar count.
+    """
+    grid = np.asarray(beats, dtype=float)
+    starts = sorted({int(np.argmin(np.abs(grid - a))) for a in anchors})
+    idx = set(range(starts[0], -1, -beats_per_bar))
+    for k, start in enumerate(starts):
+        stop = starts[k + 1] if k + 1 < len(starts) else len(beats)
+        idx.update(range(start, stop, beats_per_bar))
+    return [beats[i] for i in sorted(idx)]
 
 
 def detect_beats(audio_path: Path, sr: int = 22050) -> BeatMap:
