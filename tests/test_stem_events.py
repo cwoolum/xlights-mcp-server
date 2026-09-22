@@ -234,3 +234,11 @@ def test_missing_stems_errors_with_install_hint(analysis):
     analysis.stem_analysis = StemAnalysis()
 
     assert "separation" in stem_events(analysis, "drums", "onsets")["error"]
+
+
+def test_energy_with_a_single_point_grid(analysis):
+    analysis.beats = BeatMap(tempo=120.0, beat_times=[3.0], downbeat_times=[3.0])
+
+    payload = stem_events(analysis, "drums", "energy")
+
+    assert [p["t_ms"] for p in payload["points"]] == [0, 3000]

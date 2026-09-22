@@ -61,6 +61,11 @@ class DrumGap(BaseModel):
     decaying: bool
 
 
+def _require_positive_period(beat_period: float) -> None:
+    if not beat_period > 0:
+        raise ValueError(f"beat_period must be > 0, got {beat_period}")
+
+
 def drum_runs(drums: StemOnsets, *, beat_period: float, duration: float) -> list[DrumRun]:
     """Stretches between drum silences that hold at least one bar of onsets.
 
@@ -70,6 +75,7 @@ def drum_runs(drums: StemOnsets, *, beat_period: float, duration: float) -> list
     stretch opens with such a pickup, the run is trimmed to start at the first
     onset in its first bar that actually is a kick.
     """
+    _require_positive_period(beat_period)
     onset_times = np.asarray(drums.onset_times, dtype=float)
     order = np.argsort(onset_times)
     onsets = onset_times[order]
@@ -106,6 +112,7 @@ def drum_gaps(
     runs: list[DrumRun], drums: StemOnsets, *, duration: float, beat_period: float
 ) -> list[DrumGap]:
     """Leading, between-run and trailing gaps, measured last onset to next first onset."""
+    _require_positive_period(beat_period)
     if not runs:
         return []
     bar = BEATS_PER_BAR * beat_period

@@ -256,3 +256,7 @@ def test_detect_beats_leading_gap_with_two_anchors_reanchors_whole_song(
     # Backward from anchor 13 (13, 9, 5, 1), forward 13..49, then 53..77.
     expected_idx = [1, 5, 9] + list(range(13, 53, 4)) + list(range(53, 80, 4))
     assert result.downbeat_times == [grid[i] for i in expected_idx]
+
+
+def test_snap_handles_beats_outside_the_onset_range():
+    assert snap_beats([-5.0, 0.99, 99.0], [1.0]) == [-5.0, 1.0, 99.0]

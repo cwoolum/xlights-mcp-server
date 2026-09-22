@@ -267,3 +267,13 @@ def test_drum_runs_boundary_cases(
         gaps = drum_gaps(runs, stem, duration=duration, beat_period=PERIOD)
         mid_gaps = [g for g in gaps if g.kind == "mid"]
         assert mid_gaps[0].structural is expected_mid_structural
+
+
+@pytest.mark.parametrize("period", [0.0, -0.5])
+def test_non_positive_beat_period_is_rejected(period):
+    stem = make_drum_stem([(0, 10)], duration=10.0)
+
+    with pytest.raises(ValueError, match="beat_period"):
+        drum_runs(stem, beat_period=period, duration=10.0)
+    with pytest.raises(ValueError, match="beat_period"):
+        drum_gaps([], stem, duration=10.0, beat_period=period)
