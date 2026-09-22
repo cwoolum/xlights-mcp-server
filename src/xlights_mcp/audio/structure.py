@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable
 from itertools import pairwise
 from pathlib import Path
@@ -39,7 +40,9 @@ def detect_structure(
     With a drum stem and at least one structural mid-song drum gap, sections are
     labelled from drum presence (intro/build/drop/breakdown/outro). Otherwise the
     MFCC/chroma novelty + energy labeller is used, annotated with drum presence
-    when a drum stem exists.
+    when a drum stem exists. A drum stem without a usable beat grid (no beats, or
+    a non-positive/non-finite tempo) can't be split into bars, so it's treated as
+    drums-absent rather than silently falling back to plain mixdown-only.
     """
     logger.info(f"Analyzing song structure: {audio_path}")
     y, sr = librosa.load(str(audio_path), sr=sr, mono=True)
@@ -54,13 +57,16 @@ def detect_structure(
     novelty = _compute_novelty(rec, kernel_size=kernel_size)
     boundary_frames = _detect_boundaries(novelty, min_section_frames=15, peak_threshold=0.1)
     boundary_times = librosa.frames_to_time(boundary_frames, sr=sr).tolist()
+    # Real novelty peaks only, captured before the energy fallback below can replace
+    # them with an even split -- an even split landing inside a drum gap would read
+    # as a spurious `build` section to label_edm_sections.
+    novelty_times = [t for t in boundary_times if 0.0 < t < duration]
 
     min_sections = max(4, int(duration / 30))  # at least 1 section per 30s
     if len(boundary_times) < min_sections:
         logger.info(f"Novelty found only {len(boundary_times)} boundaries, using energy-based fallback")
         boundary_times = _energy_based_segmentation(y, sr, duration, min_sections)
 
-    novelty_times = [t for t in boundary_times if 0.0 < t < duration]
     rms = librosa.feature.rms(y=y)[0]
     rms_times = librosa.times_like(rms, sr=sr)
 
@@ -68,18 +74,22 @@ def detect_structure(
         mask = (rms_times >= start) & (rms_times < end)
         return float(np.mean(rms[mask])) if np.any(mask) else 0.0
 
-    presence = None  # drum runs merged across short stops; set when a drum stem is usable
-    if drums is not None and beats is not None and beats.tempo > 0:
-        beat_period = 60.0 / beats.tempo
-        runs = drum_runs(drums, beat_period=beat_period, duration=duration)
-        gaps = drum_gaps(runs, drums, duration=duration, beat_period=beat_period)
-        presence = merge_short_stops(runs, gaps)
-        if has_mid_structural_gap(gaps):
-            sections = label_edm_sections(
-                runs, gaps, novelty_times, beats.downbeat_times, duration, beat_period, energy_at
-            )
-            logger.info(f"Detected {len(sections)} sections from drum stem: {[s.label for s in sections]}")
-            return sections
+    presence = None  # drum runs merged across short stops; set when a drum stem is given
+    if drums is not None:
+        if beats is not None and beats.tempo > 0 and math.isfinite(beats.tempo):
+            beat_period = 60.0 / beats.tempo
+            runs = drum_runs(drums, beat_period=beat_period, duration=duration)
+            gaps = drum_gaps(runs, drums, duration=duration, beat_period=beat_period)
+            presence = merge_short_stops(runs, gaps)
+            if has_mid_structural_gap(gaps):
+                sections = label_edm_sections(
+                    runs, gaps, novelty_times, beats.downbeat_times, duration, beat_period, energy_at
+                )
+                logger.info(f"Detected {len(sections)} sections from drum stem: {[s.label for s in sections]}")
+                return sections
+        else:
+            logger.warning(f"Drum stem given without a usable beat grid ({beats=}); marking drums absent")
+            presence = []
 
     sections = _mixdown_sections(list(boundary_times), duration, energy_at, rec, features, sr)
     if presence is not None:
