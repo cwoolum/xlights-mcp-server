@@ -878,7 +878,8 @@ def detect_beats(audio_path: Path, sr: int = 22050, drums: StemOnsets | None = N
 
     if drum_aligned and tempo > 0:
         period = 60.0 / tempo
-        anchors = anchor_starts(drum_gaps(drum_runs(drums, period, duration), drums, duration, period))
+        runs = drum_runs(drums, beat_period=period, duration=duration)
+        anchors = anchor_starts(drum_gaps(runs, drums, duration=duration, beat_period=period))
         if anchors:
             downbeat_times = anchor_downbeats(beat_times, anchors)
 
@@ -957,8 +958,8 @@ PERIOD = 0.5  # 120 BPM, 2 s bars
 
 def _label(runs_spec, duration, novelty=(), decay_s=0.0):
     stem = make_drum_stem(runs_spec, duration, decay_s=decay_s)
-    runs = drum_runs(stem, PERIOD, duration)
-    gaps = drum_gaps(runs, stem, duration, PERIOD)
+    runs = drum_runs(stem, beat_period=PERIOD, duration=duration)
+    gaps = drum_gaps(runs, stem, duration=duration, beat_period=PERIOD)
     downbeats = np.arange(0, duration, 2.0).tolist()
     sections = label_edm_sections(
         runs, gaps, list(novelty), downbeats, duration, PERIOD, energy_at=lambda a, b: 1.0
@@ -1281,7 +1282,13 @@ Expected: FAIL — `TypeError: detect_structure() got an unexpected keyword argu
 - [ ] **Step 3: Implement.** Imports to add in structure.py:
 
 ```python
-from xlights_mcp.audio.drums import drum_gaps, drum_runs, has_mid_structural_gap, run_coverage
+from xlights_mcp.audio.drums import (
+    drum_gaps,
+    drum_runs,
+    has_mid_structural_gap,
+    merge_short_stops,
+    run_coverage,
+)
 from xlights_mcp.audio.edm_structure import label_edm_sections
 from xlights_mcp.audio.stems_model import StemOnsets
 ```
@@ -1331,11 +1338,12 @@ def detect_structure(
         mask = (rms_times >= start) & (rms_times < end)
         return float(np.mean(rms[mask])) if np.any(mask) else 0.0
 
-    runs = None
+    presence = None  # drum runs merged across short stops; set when a drum stem is usable
     if drums is not None and beats is not None and beats.tempo > 0:
         beat_period = 60.0 / beats.tempo
-        runs = drum_runs(drums, beat_period, duration)
-        gaps = drum_gaps(runs, drums, duration, beat_period)
+        runs = drum_runs(drums, beat_period=beat_period, duration=duration)
+        gaps = drum_gaps(runs, drums, duration=duration, beat_period=beat_period)
+        presence = merge_short_stops(runs, gaps)
         if has_mid_structural_gap(gaps):
             sections = label_edm_sections(
                 runs, gaps, novelty_times, beats.downbeat_times, duration, beat_period, energy_at
@@ -1344,10 +1352,10 @@ def detect_structure(
             return sections
 
     sections = _mixdown_sections(list(boundary_times), duration, energy_at, rec, features, sr)
-    if runs is not None:
+    if presence is not None:
         for s in sections:
             s.structure_source = "stems"
-            s.drums = "present" if run_coverage(runs, s.start_time, s.end_time) > 0.5 else "absent"
+            s.drums = "present" if run_coverage(presence, s.start_time, s.end_time) > 0.5 else "absent"
     logger.info(f"Detected {len(sections)} sections: {[s.label for s in sections]}")
     return sections
 
