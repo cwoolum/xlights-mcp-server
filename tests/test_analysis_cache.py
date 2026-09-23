@@ -152,7 +152,7 @@ def test_stems_unavailable_without_error_is_still_cached(
     from xlights_mcp.audio.separator import StemPaths
 
     config = _config(tmp_path)
-    monkeypatch.setattr(analyzer, "separate_stems", lambda _p: StemPaths(available=False))
+    monkeypatch.setattr(analyzer, "separate_stems", lambda _p, **_kw: StemPaths(available=False))
 
     full_analysis(click_track, config)
 
@@ -212,3 +212,38 @@ def test_save_cached_leaves_existing_entry_untouched_when_write_fails(
 
     assert path.read_bytes() == original_bytes
     assert list(path.parent.iterdir()) == [path]
+
+
+def test_cache_round_trips_non_ascii_paths(click_track: Path, tmp_path: Path):
+    import shutil
+
+    from xlights_mcp.audio import cache
+    from xlights_mcp.audio.analyzer import SongAnalysis
+
+    # "Á" encodes to 0xC3 0x81 in UTF-8; 0x81 is undefined in cp1252.
+    audio = tmp_path / "Álbum Ñ.wav"
+    shutil.copy(click_track, audio)
+    cache.save_cached(SongAnalysis(file_path=str(audio), file_name=audio.name), audio, tmp_path / "cache")
+
+    loaded = cache.load_cached(audio, tmp_path / "cache")
+
+    assert loaded is not None and loaded.file_name == "Álbum Ñ.wav"
+
+
+def test_failed_cache_write_keeps_the_original_error(
+    click_track: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from xlights_mcp.audio import cache
+    from xlights_mcp.audio.analyzer import SongAnalysis
+
+    def deny(*_a):
+        raise PermissionError("replace denied")
+
+    def gone(*_a):
+        raise FileNotFoundError("temp file already removed")
+
+    monkeypatch.setattr(cache.os, "replace", deny)
+    monkeypatch.setattr(cache.os, "remove", gone)
+
+    with pytest.raises(PermissionError, match="replace denied"):
+        cache.save_cached(SongAnalysis(file_path="x", file_name="x"), click_track, tmp_path / "cache")

@@ -293,3 +293,33 @@ async def test_get_stem_events_reports_error_when_stems_unavailable(
     )
 
     assert payload["error"] == STEMS_UNAVAILABLE
+
+
+async def test_concurrent_analyses_of_one_song_run_one_at_a_time(
+    click_track: Path, isolated_config: ServerConfig, monkeypatch: pytest.MonkeyPatch
+):
+    import threading
+    import time
+
+    import anyio
+
+    from xlights_mcp.audio import analyzer
+
+    guard = threading.Lock()
+    state = {"active": 0, "peak": 0}
+
+    def fake_full_analysis(path, config, progress=None, force=False):
+        with guard:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        time.sleep(0.2)
+        with guard:
+            state["active"] -= 1
+
+    monkeypatch.setattr(analyzer, "full_analysis", fake_full_analysis)
+
+    async with anyio.create_task_group() as tg:
+        for _ in range(3):
+            tg.start_soon(server_module._analyze_in_thread, click_track, None)
+
+    assert state["peak"] == 1

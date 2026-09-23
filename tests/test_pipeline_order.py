@@ -20,16 +20,16 @@ def test_drum_stem_reaches_beats_and_structure(
     calls: list[tuple[str, object]] = []
     beat_map = BeatMap(tempo=120.0)
 
-    monkeypatch.setattr(analyzer, "separate_stems", lambda _p: StemPaths(available=True))
+    monkeypatch.setattr(analyzer, "separate_stems", lambda _p, **_kw: StemPaths(available=True))
     monkeypatch.setattr(
         analyzer, "analyze_stems", lambda _s, sr: StemAnalysis(available=True, stems={"drums": drums})
     )
 
-    def fake_beats(path, sr, drums=None):
+    def fake_beats(path, sr, drums=None, **_kw):
         calls.append(("beats", drums))
         return beat_map
 
-    def fake_structure(path, sr, drums=None, beats=None):
+    def fake_structure(path, sr, drums=None, beats=None, **_kw):
         calls.append(("structure", (drums, beats)))
         return []
 
@@ -46,15 +46,15 @@ def test_without_stems_beats_and_structure_get_none(
 ):
     seen: dict[str, object] = {}
 
-    def fake_beats(path, sr, drums=None):
+    def fake_beats(path, sr, drums=None, **_kw):
         seen["beats"] = drums
         return BeatMap()
 
-    def fake_structure(path, sr, drums=None, beats=None):
+    def fake_structure(path, sr, drums=None, beats=None, **_kw):
         seen["structure"] = drums
         return []
 
-    monkeypatch.setattr(analyzer, "separate_stems", lambda _p: StemPaths(available=False))
+    monkeypatch.setattr(analyzer, "separate_stems", lambda _p, **_kw: StemPaths(available=False))
     monkeypatch.setattr(analyzer, "detect_beats", fake_beats)
     monkeypatch.setattr(analyzer, "detect_structure", fake_structure)
 

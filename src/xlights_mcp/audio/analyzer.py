@@ -11,7 +11,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from xlights_mcp.audio.beats import BeatMap, detect_beats
-from xlights_mcp.audio.cache import load_cached, save_cached
+from xlights_mcp.audio.cache import file_content_hash, load_cached, save_cached
 from xlights_mcp.audio.drums import find_silences
 from xlights_mcp.audio.separator import StemPaths, separate_stems
 from xlights_mcp.audio.spectrum import SpectrumAnalysis, analyze_spectrum
@@ -74,8 +74,9 @@ def full_analysis(
         if progress:
             progress(done, _STAGE_COUNT, message)
 
+    content_hash = file_content_hash(audio_path)
     if not force:
-        cached = load_cached(audio_path, audio_config.cache_dir)
+        cached = load_cached(audio_path, audio_config.cache_dir, content_hash)
         if cached is not None:
             report(_STAGE_COUNT, "Loaded cached analysis")
             return cached
@@ -83,15 +84,17 @@ def full_analysis(
     sr = audio_config.sample_rate
     logger.info(f"Starting full analysis: {audio_path}")
 
+    y, _ = librosa.load(str(audio_path), sr=sr, mono=True)
+
     report(0, "Analyzing spectrum and energy")
-    spectrum = analyze_spectrum(audio_path, sr=sr)
+    spectrum = analyze_spectrum(audio_path, sr=sr, y=y)
 
     report(1, "Separating stems")
     stems = StemPaths()
     stem_analysis = StemAnalysis()
     stem_pipeline_failed = False
     try:
-        stems = separate_stems(audio_path)
+        stems = separate_stems(audio_path, content_hash=content_hash)
         if stems.available:
             report(2, "Analyzing stems")
             stem_analysis = analyze_stems(stems, sr=sr)
@@ -111,9 +114,9 @@ def full_analysis(
 
     drums = stem_analysis.stems.get("drums") if stem_analysis.available else None
     report(3, "Detecting beats and tempo")
-    beats = detect_beats(audio_path, sr=sr, drums=drums)
+    beats = detect_beats(audio_path, sr=sr, drums=drums, y=y)
     report(4, "Detecting song structure")
-    sections = detect_structure(audio_path, sr=sr, drums=drums, beats=beats)
+    sections = detect_structure(audio_path, sr=sr, drums=drums, beats=beats, y=y)
 
     analysis = SongAnalysis(
         file_path=str(audio_path),
@@ -140,7 +143,7 @@ def full_analysis(
             "a later call will retry it."
         )
     else:
-        save_cached(analysis, audio_path, audio_config.cache_dir)
+        save_cached(analysis, audio_path, audio_config.cache_dir, content_hash)
     report(_STAGE_COUNT, "Analysis complete")
     return analysis
 

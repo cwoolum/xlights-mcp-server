@@ -34,7 +34,7 @@ def _stub_heavy_backends(request: pytest.FixtureRequest, monkeypatch: pytest.Mon
     from xlights_mcp.audio import analyzer, beats
     from xlights_mcp.audio.separator import StemPaths
 
-    monkeypatch.setattr(analyzer, "separate_stems", lambda _path: StemPaths(available=False))
+    monkeypatch.setattr(analyzer, "separate_stems", lambda _path, **_kw: StemPaths(available=False))
     if not request.node.get_closest_marker("real_madmom_grid"):
         monkeypatch.setattr(beats, "_madmom_grid", lambda _path: None)
 

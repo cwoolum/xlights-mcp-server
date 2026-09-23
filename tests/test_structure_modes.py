@@ -85,7 +85,8 @@ def test_mid_structural_gap_switches_to_edm_labels(click_track: Path, monkeypatc
     edm = [SongSection(label="drop", start_time=0.0, end_time=130.0, structure_source="stems")]
     captured = {}
 
-    def fake_label(gaps, novelty, downbeats, duration, beat_period, energy_at):
+    def fake_label(gaps, novelty, downbeats, duration, beat_period, energy_at, anchor_times=None):
+        captured["anchor_times"] = anchor_times
         captured["duration"] = duration
         captured["beat_period"] = beat_period
         captured["downbeats"] = downbeats
@@ -98,6 +99,7 @@ def test_mid_structural_gap_switches_to_edm_labels(click_track: Path, monkeypatc
     monkeypatch.setattr(structure.librosa, "get_duration", lambda **_k: 130.0)
 
     assert detect_structure(click_track, drums=drums, beats=beats) == edm
+    assert captured["anchor_times"] is beats.anchor_times
     assert captured["duration"] == 130.0
     assert captured["beat_period"] == 0.5
     assert captured["downbeats"] is beats.downbeat_times

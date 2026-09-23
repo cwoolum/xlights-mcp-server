@@ -58,6 +58,7 @@ def analyze_spectrum(
     audio_path: Path,
     sr: int = 22050,
     use_simple_bands: bool = True,
+    y: np.ndarray | None = None,
 ) -> SpectrumAnalysis:
     """Analyze frequency spectrum and energy of an audio file.
 
@@ -65,9 +66,11 @@ def analyze_spectrum(
         audio_path: Path to audio file
         sr: Sample rate
         use_simple_bands: Use 3-band (bass/mid/high) split instead of 7-band
+        y: Already-decoded mono audio at `sr`, to skip re-decoding the file
     """
     logger.info(f"Analyzing spectrum: {audio_path}")
-    y, sr = librosa.load(str(audio_path), sr=sr, mono=True)
+    if y is None:
+        y, sr = librosa.load(str(audio_path), sr=sr, mono=True)
     duration = librosa.get_duration(y=y, sr=sr)
 
     # RMS energy (overall loudness)

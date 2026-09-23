@@ -34,6 +34,7 @@ def detect_structure(
     sr: int = 22050,
     drums: StemOnsets | None = None,
     beats: BeatMap | None = None,
+    y: np.ndarray | None = None,
 ) -> list[SongSection]:
     """Detect song sections.
 
@@ -45,7 +46,8 @@ def detect_structure(
     drums-absent rather than silently falling back to plain mixdown-only.
     """
     logger.info(f"Analyzing song structure: {audio_path}")
-    y, sr = librosa.load(str(audio_path), sr=sr, mono=True)
+    if y is None:
+        y, sr = librosa.load(str(audio_path), sr=sr, mono=True)
     duration = librosa.get_duration(y=y, sr=sr)
 
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
@@ -83,7 +85,13 @@ def detect_structure(
             presence = merge_short_stops(runs, gaps)
             if has_mid_structural_gap(gaps):
                 sections = label_edm_sections(
-                    gaps, novelty_times, beats.downbeat_times, duration, beat_period, energy_at
+                    gaps,
+                    novelty_times,
+                    beats.downbeat_times,
+                    duration,
+                    beat_period,
+                    energy_at,
+                    anchor_times=beats.anchor_times,
                 )
                 logger.info(f"Detected {len(sections)} sections from drum stem: {[s.label for s in sections]}")
                 return sections

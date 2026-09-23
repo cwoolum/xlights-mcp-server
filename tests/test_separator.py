@@ -111,3 +111,23 @@ def test_separate_stems_not_installed_is_not_marked_failed(
 
     assert stems.available is False
     assert stems.failed is False
+
+
+def test_broken_torch_import_counts_as_not_installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def failing_import(name, *args, **kwargs):
+        if name == "torch":
+            raise OSError("[WinError 126] fbgemm.dll could not be loaded")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", failing_import)
+    audio = tmp_path / "song.wav"
+    sf.write(audio, np.zeros(22050, dtype=np.float32), 22050)
+
+    stems = separate_stems(audio)
+
+    assert stems.available is False
+    assert stems.failed is False

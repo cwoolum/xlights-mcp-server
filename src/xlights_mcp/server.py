@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -299,15 +300,34 @@ def _progress_forwarder(ctx: Context):
     return on_progress
 
 
+_analysis_locks: dict[str, threading.Lock] = {}
+_analysis_locks_guard = threading.Lock()
+
+
+def _analysis_lock(path: Path) -> threading.Lock:
+    key = str(path.resolve())
+    with _analysis_locks_guard:
+        return _analysis_locks.setdefault(key, threading.Lock())
+
+
 async def _analyze_in_thread(path: Path, ctx: Context, force: bool = False):
-    """Run full_analysis off the event loop, forwarding stage progress to the client."""
+    """Run full_analysis off the event loop, forwarding stage progress to the client.
+
+    Calls for the same file run one at a time: parallel tool calls would otherwise
+    run duplicate pipelines that write the same stems directory concurrently. A
+    waiting call then finds the first call's result in the cache.
+    """
     from xlights_mcp.audio.analyzer import full_analysis
 
     config = get_config()
     on_progress = _progress_forwarder(ctx)
-    return await anyio.to_thread.run_sync(
-        lambda: full_analysis(path, config.audio, progress=on_progress, force=force)
-    )
+    lock = _analysis_lock(path)
+
+    def run():
+        with lock:
+            return full_analysis(path, config.audio, progress=on_progress, force=force)
+
+    return await anyio.to_thread.run_sync(run)
 
 
 @mcp.tool()

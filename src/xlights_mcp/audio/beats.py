@@ -26,6 +26,9 @@ class BeatMap(BaseModel):
     beats_per_bar: int = 4
     beat_source: Literal["madmom", "librosa"] = "librosa"
     drum_aligned: bool = False
+    # Beats where bar 1 was re-anchored to a drum re-entry; structure detection
+    # uses these same points as drop boundaries.
+    anchor_times: list[float] = Field(default_factory=list)
 
     @property
     def beat_times_ms(self) -> list[int]:
@@ -85,7 +88,12 @@ def anchor_downbeats(
     return [beats[i] for i in sorted(idx)]
 
 
-def detect_beats(audio_path: Path, sr: int = 22050, drums: StemOnsets | None = None) -> BeatMap:
+def detect_beats(
+    audio_path: Path,
+    sr: int = 22050,
+    drums: StemOnsets | None = None,
+    y: np.ndarray | None = None,
+) -> BeatMap:
     """Detect beats, downbeats and mixdown onsets.
 
     Base grid from madmom when installed, else librosa. With a drum stem the grid
@@ -93,7 +101,8 @@ def detect_beats(audio_path: Path, sr: int = 22050, drums: StemOnsets | None = N
     structural drum gap (see docs/superpowers/specs/2026-09-22-stem-aware-analysis-design.md).
     """
     logger.info(f"Analyzing beats: {audio_path}")
-    y, sr = librosa.load(str(audio_path), sr=sr, mono=True)
+    if y is None:
+        y, sr = librosa.load(str(audio_path), sr=sr, mono=True)
     duration = librosa.get_duration(y=y, sr=sr)
 
     onset_env = librosa.onset.onset_strength(y=y, sr=sr)
@@ -118,6 +127,7 @@ def detect_beats(audio_path: Path, sr: int = 22050, drums: StemOnsets | None = N
     tempo = 60.0 / float(np.median(np.diff(beat_times))) if len(beat_times) > 1 else 0.0
 
     drum_aligned = False
+    anchor_times: list[float] = []
     if drums is not None and drums.onset_times and beat_times:
         beat_times = snap_beats(beat_times, drums.onset_times)
         drum_aligned = True
@@ -136,6 +146,7 @@ def detect_beats(audio_path: Path, sr: int = 22050, drums: StemOnsets | None = N
             )
         if valid_anchors:
             downbeat_times = anchor_downbeats(beat_times, valid_anchors)
+            anchor_times = [beat_times[int(np.argmin(np.abs(grid_arr - a)))] for a in valid_anchors]
     elif drum_aligned:
         logger.debug("drum_aligned but tempo is 0; skipping downbeat re-anchoring")
 
@@ -150,6 +161,7 @@ def detect_beats(audio_path: Path, sr: int = 22050, drums: StemOnsets | None = N
         onset_times=onset_times,
         beat_source=beat_source,
         drum_aligned=drum_aligned,
+        anchor_times=anchor_times,
     )
 
 

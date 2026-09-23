@@ -216,3 +216,19 @@ def test_merge_short_never_deletes_a_protected_point():
     assert _merge_short(
         [0.0, 5.0, 8.5, 9.0, 10.0], 2.0, protected={8.5, 9.0}
     ) == [0.0, 5.0, 8.5, 9.0, 10.0]
+
+
+def test_gap_whose_edges_snap_to_one_downbeat_keeps_its_raw_edges():
+    period = 1.1  # slow grid: half a bar (2.2 s) is wider than half this 4.1 s gap
+    stem = make_drum_stem([(0, 61.0), (64.6, 100)], duration=100)  # runs 0-60.5, 64.6-99.6
+    runs = drum_runs(stem, beat_period=period, duration=100)
+    gaps = drum_gaps(runs, stem, duration=100, beat_period=period)
+    downbeats = np.arange(1.0, 100, 4.4).tolist()  # 60.5 and 64.6 both snap to 62.6
+
+    sections = label_edm_sections(gaps, [], downbeats, 100, period, energy_at=lambda a, b: 1.0)
+
+    assert [(s.label, s.start_time, s.end_time) for s in sections] == [
+        ("intro", 0.0, 60.5),
+        ("build", 60.5, 64.6),
+        ("drop", 64.6, 100.0),
+    ]

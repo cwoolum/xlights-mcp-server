@@ -27,23 +27,46 @@ def label_edm_sections(
     duration: float,
     beat_period: float,
     energy_at: Callable[[float, float], float],
+    anchor_times: list[float] | None = None,
 ) -> list[SongSection]:
+    """Label sections from drum gaps.
+
+    anchor_times are the drop starts the beat grid was re-anchored to
+    (BeatMap.anchor_times); when omitted they are derived from the gaps.
+    """
     downbeats = np.asarray(downbeat_times, dtype=float)
     structural = [g for g in gaps if g.structural]
+    max_dist = 2 * beat_period  # half a bar: snapping this far is no longer "nearby"
 
     drum_bounds: list[float] = []
+    snapped_bounds: list[float] = []
+    # A gap shorter than the snapping distance can have both edges snap to the
+    # same downbeat and vanish; such a gap keeps its raw edges.
+    unsnapped_ends: dict[float, float] = {}
     for g in structural:
-        if g.kind != "leading":
+        start = _snap(g.start, downbeats, max_dist) if g.kind != "leading" else None
+        end = _snap(g.end, downbeats, max_dist) if g.kind != "trailing" else None
+        if start is not None and end is not None and _close(start, end):
+            unsnapped_ends[end] = g.end
+            start, end = g.start, g.end
+        if start is not None:
             drum_bounds.append(g.start)
-        if g.kind != "trailing":
+            snapped_bounds.append(start)
+        if end is not None:
             drum_bounds.append(g.end)
+            snapped_bounds.append(end)
     novelty = [n for n in novelty_times if all(abs(n - d) >= NOVELTY_MERGE_S for d in drum_bounds)]
 
-    max_dist = 2 * beat_period  # half a bar: snapping this far is no longer "nearby"
-    inner = sorted({_snap(t, downbeats, max_dist) for t in drum_bounds + novelty})
+    inner = sorted({*snapped_bounds, *(_snap(t, downbeats, max_dist) for t in novelty)})
     points = [0.0] + [p for p in inner if 0.0 < p < duration] + [float(duration)]
 
-    anchors = {_snap(a, downbeats, max_dist) for a in anchor_starts(gaps)}
+    if anchor_times is None:
+        anchor_times = anchor_starts(gaps)
+    anchors = set()
+    for a in anchor_times:
+        snapped = _snap(a, downbeats, max_dist)
+        collapsed = next((raw for s, raw in unsnapped_ends.items() if _close(s, snapped)), None)
+        anchors.add(collapsed if collapsed is not None else snapped)
     min_len = (BEATS_PER_BAR - 0.5) * beat_period
     points = _merge_short(points, min_len, protected=anchors)
 
