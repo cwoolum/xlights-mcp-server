@@ -3,108 +3,134 @@
 from __future__ import annotations
 
 import logging
+import math
+from collections.abc import Callable
+from itertools import pairwise
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import librosa
 import numpy as np
-from pydantic import BaseModel, Field
+
+from xlights_mcp.audio.drums import (
+    drum_gaps,
+    drum_runs,
+    has_mid_structural_gap,
+    merge_short_stops,
+    run_coverage,
+)
+from xlights_mcp.audio.edm_structure import label_edm_sections
+from xlights_mcp.audio.sections import SongSection
+from xlights_mcp.audio.stems_model import StemOnsets
+
+if TYPE_CHECKING:
+    from xlights_mcp.audio.beats import BeatMap
 
 logger = logging.getLogger(__name__)
 
 
-class SongSection(BaseModel):
-    """A detected section of a song (verse, chorus, bridge, etc.)."""
+def detect_structure(
+    audio_path: Path,
+    sr: int = 22050,
+    drums: StemOnsets | None = None,
+    beats: BeatMap | None = None,
+    y: np.ndarray | None = None,
+) -> list[SongSection]:
+    """Detect song sections.
 
-    label: str  # "intro", "verse", "chorus", "bridge", "outro", "instrumental"
-    start_time: float  # seconds
-    end_time: float  # seconds
-    energy_level: float = 0.0  # 0.0-1.0 average energy
-    confidence: float = 0.0  # detection confidence
-
-    @property
-    def start_time_ms(self) -> int:
-        return int(self.start_time * 1000)
-
-    @property
-    def end_time_ms(self) -> int:
-        return int(self.end_time * 1000)
-
-    @property
-    def duration(self) -> float:
-        return self.end_time - self.start_time
-
-
-def detect_structure(audio_path: Path, sr: int = 22050) -> list[SongSection]:
-    """Detect song structure (verse/chorus/bridge/etc.).
-
-    Uses a hybrid approach:
-    1. MFCC/chroma self-similarity for boundary detection
-    2. RMS energy for section labeling
-    3. Fallback to energy-based segmentation if too few boundaries found
+    With a drum stem and at least one structural mid-song drum gap, sections are
+    labelled from drum presence (intro/build/drop/breakdown/outro). Otherwise the
+    MFCC/chroma novelty + energy labeller is used, annotated with drum presence
+    when a drum stem exists. A drum stem without a usable beat grid (no beats, or
+    a non-positive/non-finite tempo) can't be split into bars, so it's treated as
+    drums-absent rather than silently falling back to plain mixdown-only.
     """
     logger.info(f"Analyzing song structure: {audio_path}")
-    y, sr = librosa.load(str(audio_path), sr=sr, mono=True)
+    if y is None:
+        y, sr = librosa.load(str(audio_path), sr=sr, mono=True)
     duration = librosa.get_duration(y=y, sr=sr)
 
-    # Extract features for structure analysis
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
     features = np.vstack([mfcc, chroma])
+    rec = librosa.segment.recurrence_matrix(features, mode="affinity", sym=True, bandwidth=1.0)
 
-    # Build self-similarity matrix
-    rec = librosa.segment.recurrence_matrix(
-        features, mode="affinity", sym=True, bandwidth=1.0
-    )
-
-    # Compute novelty curve with adaptive kernel
     kernel_size = max(8, min(64, features.shape[1] // 20))
     novelty = _compute_novelty(rec, kernel_size=kernel_size)
     boundary_frames = _detect_boundaries(novelty, min_section_frames=15, peak_threshold=0.1)
     boundary_times = librosa.frames_to_time(boundary_frames, sr=sr).tolist()
+    # Real novelty peaks only, captured before the energy fallback below can replace
+    # them with an even split -- an even split landing inside a drum gap would read
+    # as a spurious `build` section to label_edm_sections.
+    novelty_times = [t for t in boundary_times if 0.0 < t < duration]
 
-    # If we got too few sections, fall back to energy-based segmentation
     min_sections = max(4, int(duration / 30))  # at least 1 section per 30s
     if len(boundary_times) < min_sections:
         logger.info(f"Novelty found only {len(boundary_times)} boundaries, using energy-based fallback")
         boundary_times = _energy_based_segmentation(y, sr, duration, min_sections)
 
-    # Ensure start and end
+    rms = librosa.feature.rms(y=y)[0]
+    rms_times = librosa.times_like(rms, sr=sr)
+
+    def energy_at(start: float, end: float) -> float:
+        mask = (rms_times >= start) & (rms_times < end)
+        return float(np.mean(rms[mask])) if np.any(mask) else 0.0
+
+    presence = None  # drum runs merged across short stops; set when a drum stem is given
+    if drums is not None:
+        if beats is not None and beats.tempo > 0 and math.isfinite(beats.tempo):
+            beat_period = 60.0 / beats.tempo
+            runs = drum_runs(drums, beat_period=beat_period, duration=duration)
+            gaps = drum_gaps(runs, drums, duration=duration, beat_period=beat_period)
+            presence = merge_short_stops(runs, gaps)
+            if has_mid_structural_gap(gaps):
+                sections = label_edm_sections(
+                    gaps,
+                    novelty_times,
+                    beats.downbeat_times,
+                    duration,
+                    beat_period,
+                    energy_at,
+                    anchor_times=beats.anchor_times,
+                )
+                logger.info(f"Detected {len(sections)} sections from drum stem: {[s.label for s in sections]}")
+                return sections
+        else:
+            logger.warning(f"Drum stem given without a usable beat grid ({beats=}); marking drums absent")
+            presence = []
+
+    sections = _mixdown_sections(list(boundary_times), duration, energy_at, rec, features, sr)
+    if presence is not None:
+        for s in sections:
+            s.structure_source = "stems"
+            s.drums = "present" if run_coverage(presence, s.start_time, s.end_time) > 0.5 else "absent"
+    logger.info(f"Detected {len(sections)} sections: {[s.label for s in sections]}")
+    return sections
+
+
+def _mixdown_sections(
+    boundary_times: list[float],
+    duration: float,
+    energy_at: Callable[[float, float], float],
+    rec: np.ndarray,
+    features: np.ndarray,
+    sr: int,
+) -> list[SongSection]:
+    """Existing boundary cleanup, per-section energy and heuristic labelling."""
     if not boundary_times or boundary_times[0] > 2.0:
         boundary_times.insert(0, 0.0)
     if boundary_times[-1] < duration - 2.0:
         boundary_times.append(duration)
-
-    # Remove duplicates and sort
     boundary_times = sorted(set(round(t, 2) for t in boundary_times))
 
-    # Compute energy per section
-    rms = librosa.feature.rms(y=y)[0]
-    rms_times = librosa.times_like(rms, sr=sr)
-
     sections = []
-    for i in range(len(boundary_times) - 1):
-        start = boundary_times[i]
-        end = boundary_times[i + 1]
-        if end - start < 1.0:  # skip tiny sections
+    for start, end in pairwise(boundary_times):
+        if end - start < 1.0:
             continue
-
-        mask = (rms_times >= start) & (rms_times < end)
-        section_energy = float(np.mean(rms[mask])) if np.any(mask) else 0.0
-
         sections.append(
-            SongSection(
-                label="unknown",
-                start_time=start,
-                end_time=end,
-                energy_level=section_energy,
-            )
+            SongSection(label="unknown", start_time=start, end_time=end, energy_level=energy_at(start, end))
         )
-
-    # Label sections
-    sections = _label_sections(sections, duration, rec, features, sr)
-
-    logger.info(f"Detected {len(sections)} sections: {[s.label for s in sections]}")
-    return sections
+    return _label_sections(sections, duration, rec, features, sr)
 
 
 def _energy_based_segmentation(

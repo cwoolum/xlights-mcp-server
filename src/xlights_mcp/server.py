@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import tempfile
+import threading
 import time
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+import anyio
+from mcp.server.fastmcp import Context, FastMCP
 
-from xlights_mcp.config import load_config, save_config, ServerConfig
+from xlights_mcp.config import ServerConfig, load_config, save_config
 
 logger = logging.getLogger(__name__)
 
@@ -288,78 +290,227 @@ def list_effects() -> dict:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
-def analyze_song(mp3_path: str) -> dict:
-    """Analyze a music file for light show sequencing.
+def _progress_forwarder(ctx: Context):
+    """Build a progress callback usable from a worker thread that notifies the client."""
 
-    Performs full audio analysis: beat detection, song structure,
-    frequency spectrum, energy profile, and optionally source separation.
+    def on_progress(done: int, total: int, message: str) -> None:
+        # Runs on the worker thread; hop back to the event loop to notify the client.
+        anyio.from_thread.run(ctx.report_progress, done, total, message)
 
-    Args:
-        mp3_path: Path to the .mp3 file to analyze
+    return on_progress
+
+
+_analysis_locks: dict[str, threading.Lock] = {}
+_analysis_locks_guard = threading.Lock()
+
+
+def _analysis_lock(path: Path) -> threading.Lock:
+    key = str(path.resolve())
+    with _analysis_locks_guard:
+        return _analysis_locks.setdefault(key, threading.Lock())
+
+
+async def _analyze_in_thread(path: Path, ctx: Context, force: bool = False):
+    """Run full_analysis off the event loop, forwarding stage progress to the client.
+
+    Calls for the same file run one at a time: parallel tool calls would otherwise
+    run duplicate pipelines that write the same stems directory concurrently. A
+    waiting call then finds the first call's result in the cache.
     """
     from xlights_mcp.audio.analyzer import full_analysis
 
-    path = Path(mp3_path).expanduser()
-    if not path.exists():
-        return {"error": f"File not found: {path}"}
-
     config = get_config()
-    analysis = full_analysis(path, config.audio)
-    return analysis.model_dump()
+    on_progress = _progress_forwarder(ctx)
+    lock = _analysis_lock(path)
+
+    def run():
+        with lock:
+            return full_analysis(path, config.audio, progress=on_progress, force=force)
+
+    return await anyio.to_thread.run_sync(run)
 
 
 @mcp.tool()
-def get_song_structure(mp3_path: str) -> dict:
-    """Get the verse/chorus/bridge structure of a song.
+async def analyze_song(mp3_path: str, ctx: Context, force: bool = False) -> dict:
+    """Analyze a music file for light show sequencing.
+
+    Performs full audio analysis: beat detection, song structure,
+    frequency spectrum, energy profile, and source separation. Separation is
+    always attempted; it's a no-op when Demucs isn't installed. Progress is
+    streamed as MCP progress notifications while it runs.
+
+    Results are cached on disk keyed by file content, so repeat calls (and
+    create_sequence on the same file) return instantly. Returns a compact
+    summary; use get_beat_map / get_energy_profile / get_song_structure / get_stem_events for
+    detailed data.
+
+    The response also includes: stems is a per-stem summary
+    {onsets, mean_energy, silences_ms} keyed by "drums"/"bass"/"vocals"/"other", or
+    null when source separation is unavailable — in that case get_stem_events will
+    also return an error. sections[].drums is "present"/"absent"/"decaying", or null
+    when that section's structure came from the mixdown only (no drum stem).
+    beat_source ("madmom"/"librosa") and drum_aligned say whether the beat grid used
+    the drum-aware pipeline; structure_source ("stems"/"mixdown") says the same for
+    the song sections.
 
     Args:
-        mp3_path: Path to the .mp3 file
+        mp3_path: Path to the audio file to analyze (.mp3, .wav, .ogg, ...)
+        force: Re-run analysis even if a cached result exists
     """
-    from xlights_mcp.audio.structure import detect_structure
+    from xlights_mcp.audio.stem_events import stems_summary
 
     path = Path(mp3_path).expanduser()
     if not path.exists():
         return {"error": f"File not found: {path}"}
 
-    sections = detect_structure(path)
-    return {"sections": [s.model_dump() for s in sections]}
+    started = time.monotonic()
+    analysis = await _analyze_in_thread(path, ctx, force=force)
+    elapsed = time.monotonic() - started
+
+    return {
+        "file_name": analysis.file_name,
+        "duration_seconds": round(analysis.duration_seconds, 2),
+        "tempo_bpm": round(analysis.beats.tempo, 1),
+        "beat_count": len(analysis.beats.beat_times),
+        "onset_count": len(analysis.beats.onset_times),
+        "beat_source": analysis.beats.beat_source,
+        "drum_aligned": analysis.beats.drum_aligned,
+        "structure_source": analysis.sections[0].structure_source if analysis.sections else "mixdown",
+        "sections": [s.model_dump() for s in analysis.sections],
+        "peak_loudness_time": round(analysis.spectrum.peak_loudness_time, 2),
+        "dynamic_range": round(analysis.spectrum.dynamic_range, 2),
+        "stems": stems_summary(analysis),
+        "cached": analysis.cached,
+        "elapsed_seconds": round(elapsed, 1),
+    }
 
 
 @mcp.tool()
-def get_beat_map(mp3_path: str) -> dict:
+async def get_song_structure(mp3_path: str, ctx: Context) -> dict:
+    """Get the song's section structure.
+
+    EDM tracks (with a mid-song structural drum gap) are labelled intro/build/
+    drop/breakdown/outro; other tracks get pop-song labels (verse/chorus/
+    bridge/intro/outro/transition/instrumental). Each section's
+    structure_source ("stems"/"mixdown") says whether drum-stem presence drove
+    the labelling, and drums ("present"/"absent"/"decaying", or null when
+    structure_source is "mixdown") says whether the drums were present,
+    absent, or fading out through that section.
+
+    Served from the analysis cache when available (see analyze_song).
+
+    Args:
+        mp3_path: Path to the audio file
+    """
+    path = Path(mp3_path).expanduser()
+    if not path.exists():
+        return {"error": f"File not found: {path}"}
+
+    analysis = await _analyze_in_thread(path, ctx)
+    return {"sections": [s.model_dump() for s in analysis.sections]}
+
+
+@mcp.tool()
+async def get_beat_map(mp3_path: str, ctx: Context) -> dict:
     """Get beat and downbeat timestamps for a song.
 
-    Args:
-        mp3_path: Path to the .mp3 file
-    """
-    from xlights_mcp.audio.beats import detect_beats
+    beat_source ("madmom"/"librosa") says which beat tracker produced the
+    grid. drum_aligned says whether it was snapped to drum-stem onsets and
+    re-anchored to bar 1 at structural drum gaps; false means the grid is
+    the plain mixdown-only detection.
 
+    Served from the analysis cache when available (see analyze_song).
+
+    Args:
+        mp3_path: Path to the audio file
+    """
     path = Path(mp3_path).expanduser()
     if not path.exists():
         return {"error": f"File not found: {path}"}
 
-    result = detect_beats(path)
-    return result.model_dump()
+    analysis = await _analyze_in_thread(path, ctx)
+    return analysis.beats.model_dump()
 
 
 @mcp.tool()
-def get_energy_profile(mp3_path: str) -> dict:
+async def get_energy_profile(mp3_path: str, ctx: Context) -> dict:
     """Get energy and frequency band analysis for a song.
 
     Returns loudness curve and bass/mid/high energy over time.
+    Served from the analysis cache when available (see analyze_song).
 
     Args:
-        mp3_path: Path to the .mp3 file
+        mp3_path: Path to the audio file
     """
-    from xlights_mcp.audio.spectrum import analyze_spectrum
-
     path = Path(mp3_path).expanduser()
     if not path.exists():
         return {"error": f"File not found: {path}"}
 
-    result = analyze_spectrum(path)
-    return result.model_dump()
+    analysis = await _analyze_in_thread(path, ctx)
+    return analysis.spectrum.model_dump()
+
+
+@mcp.tool()
+async def get_stem_events(
+    mp3_path: str,
+    ctx: Context,
+    stem: str,
+    kind: str,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+    max_events: int = 500,
+    resolution: str = "beat",
+) -> dict:
+    """Get per-stem events from source separation (drums, bass, vocals, other).
+
+    Requires source separation to have run for this file: if analyze_song returned
+    "stems": null, this returns {"error": ...}.
+
+    kind="onsets": hit times in the window, e.g. drum hits or vocal phrase starts.
+    Returns {"count", "events_ms": [int, ...]}; count is the total number of onsets
+    in the window before any truncation.
+
+    kind="energy": stem loudness over the window, one point per beat (resolution=
+    "beat") or bar ("bar") span that starts inside the window. If the grid starts at
+    least half a beat/bar after 0, an extra point at t_ms=0 covers the intro
+    [0, first grid time); like any point, it is only returned when the window
+    includes 0. Returns {"resolution", "points": [{"t_ms", "energy"}, ...]}; energy
+    is 0-1, rounded to 3 decimal places.
+
+    kind="silences": [start, end] ms spans where the stem is silent, clipped to the
+    window. Returns {"spans_ms": [[start, end], ...]} and is never truncated. For
+    drums, a silence marks a breakdown, riser, or other gap; the span's END is where
+    the drums come back in (e.g. a drop).
+
+    onsets and energy return at most max_events items; when the response has
+    truncated=true, call again with start_ms=next_start_ms to continue. An invalid
+    stem, kind, resolution, max_events, or window (start_ms > end_ms) returns
+    {"error": ...} without analysing.
+
+    Served from the analysis cache when available (see analyze_song).
+
+    Args:
+        mp3_path: Path to the audio file
+        stem: drums | bass | vocals | other
+        kind: onsets | energy | silences
+        start_ms: Window start (default: track start)
+        end_ms: Window end, exclusive (default: track end)
+        max_events: Maximum events or points to return
+        resolution: beat | bar (energy only)
+    """
+    from xlights_mcp.audio.stem_events import stem_events, validate_stem_query
+
+    error = validate_stem_query(
+        stem, kind, resolution, max_events=max_events, start_ms=start_ms, end_ms=end_ms
+    )
+    if error:
+        return {"error": error}
+    path = Path(mp3_path).expanduser()
+    if not path.exists():
+        return {"error": f"File not found: {path}"}
+
+    analysis = await _analyze_in_thread(path, ctx)
+    return stem_events(analysis, stem, kind, start_ms, end_ms, max_events, resolution)
 
 
 # ---------------------------------------------------------------------------
@@ -368,8 +519,9 @@ def get_energy_profile(mp3_path: str) -> dict:
 
 
 @mcp.tool()
-def create_sequence(
+async def create_sequence(
     mp3_path: str,
+    ctx: Context,
     mode: str = "auto",
     palette_hint: str | None = None,
     theme: str | None = None,
@@ -410,20 +562,25 @@ def create_sequence(
     if isinstance(show_path, dict):
         return show_path
 
-    result = generate_sequence(
-        mp3_path=path,
-        show_path=show_path,
-        mode=mode,
-        palette_hint=palette_hint,
-        theme=theme,
-        audio_config=config.audio,
-        vocal_assignments=vocal_assignments,
+    on_progress = _progress_forwarder(ctx)
+    return await anyio.to_thread.run_sync(
+        lambda: generate_sequence(
+            mp3_path=path,
+            show_path=show_path,
+            mode=mode,
+            palette_hint=palette_hint,
+            theme=theme,
+            audio_config=config.audio,
+            vocal_assignments=vocal_assignments,
+            progress=on_progress,
+        )
     )
-    return result
 
 
 @mcp.tool()
-def preview_plan(mp3_path: str, mode: str = "auto", show_name: str | None = None) -> dict:
+async def preview_plan(
+    mp3_path: str, ctx: Context, mode: str = "auto", show_name: str | None = None
+) -> dict:
     """Preview the sequence generation plan without creating a file.
 
     Shows what effects would be placed on which models, based on the
@@ -446,11 +603,15 @@ def preview_plan(mp3_path: str, mode: str = "auto", show_name: str | None = None
     if isinstance(show_path, dict):
         return show_path
 
-    return preview_sequence_plan(
-        mp3_path=path,
-        show_path=show_path,
-        mode=mode,
-        audio_config=config.audio,
+    on_progress = _progress_forwarder(ctx)
+    return await anyio.to_thread.run_sync(
+        lambda: preview_sequence_plan(
+            mp3_path=path,
+            show_path=show_path,
+            mode=mode,
+            audio_config=config.audio,
+            progress=on_progress,
+        )
     )
 
 
@@ -485,13 +646,13 @@ async def remap_sequence(
     Returns:
         Dict with mapping report, output path, and summary statistics.
     """
+    from xlights_mcp.remapper.generator import generate_remapped_sequence
     from xlights_mcp.remapper.importer import import_package
     from xlights_mcp.remapper.matcher import (
         build_candidates_from_import,
         build_candidates_from_user_show,
         match_models,
     )
-    from xlights_mcp.remapper.generator import generate_remapped_sequence
     from xlights_mcp.remapper.models import RemapResult
     from xlights_mcp.xlights.show import load_show_config
 
@@ -674,10 +835,15 @@ def _preload_audio_stack() -> None:
         from xlights_mcp.audio.structure import detect_structure
 
         try:
+            import madmom.features.downbeats  # noqa: F401
+        except Exception as e:  # noqa: BLE001 - a broken madmom install must not abort warm-up
+            logger.debug(f"madmom unavailable, skipping preload: {e}")
+
+        try:
             import demucs.separate  # noqa: F401
             import torch  # noqa: F401
-        except ImportError:
-            pass
+        except Exception as e:  # noqa: BLE001 - a broken demucs/torch install must not abort warm-up
+            logger.debug(f"demucs/torch unavailable, skipping preload: {e}")
 
         sr = 22050
         t = np.arange(sr * 6) / sr

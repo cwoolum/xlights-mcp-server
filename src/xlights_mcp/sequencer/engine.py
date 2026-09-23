@@ -22,7 +22,7 @@ import logging
 import random
 from pathlib import Path
 
-from xlights_mcp.audio.analyzer import SongAnalysis, StemAnalysis, full_analysis
+from xlights_mcp.audio.analyzer import ProgressCallback, SongAnalysis, StemAnalysis, full_analysis
 from xlights_mcp.audio.structure import SongSection
 from xlights_mcp.config import AudioConfig
 from xlights_mcp.xlights.models import LightModel, ShowConfig
@@ -305,6 +305,11 @@ SECTION_TYPE_CONFIG: dict[str, dict] = {
     "instrumental": {"use_motion": True, "use_accents": True},
 }
 
+# Drum-derived labels reuse the closest existing behaviour until they get their own recipes.
+SECTION_TYPE_CONFIG["build"] = SECTION_TYPE_CONFIG["transition"]
+SECTION_TYPE_CONFIG["drop"] = SECTION_TYPE_CONFIG["chorus"]
+SECTION_TYPE_CONFIG["breakdown"] = SECTION_TYPE_CONFIG["bridge"]
+
 
 # ---------------------------------------------------------------------------
 # Model grouping — auto-detect groups from model names
@@ -396,6 +401,7 @@ def generate_sequence(
     theme: str | None = None,
     audio_config: AudioConfig | None = None,
     vocal_assignments: dict[str, str] | None = None,
+    progress: ProgressCallback | None = None,
 ) -> dict:
     """Generate a complete xLights sequence from a music file.
 
@@ -412,7 +418,7 @@ def generate_sequence(
     if not show_config.models:
         return {"error": "No models found in show configuration"}
 
-    analysis = full_analysis(mp3_path, audio_config)
+    analysis = full_analysis(mp3_path, audio_config, progress=progress)
 
     if mode == "auto":
         return _generate_auto(
@@ -432,12 +438,13 @@ def preview_sequence_plan(
     show_path: Path | None,
     mode: str = "auto",
     audio_config: AudioConfig | None = None,
+    progress: ProgressCallback | None = None,
 ) -> dict:
     """Preview what a sequence would look like without generating."""
     if not show_path or not show_path.exists():
         return {"error": f"Show path not found: {show_path}"}
 
-    analysis = full_analysis(mp3_path, audio_config)
+    analysis = full_analysis(mp3_path, audio_config, progress=progress)
     show_config = load_show_config(show_path)
 
     sections_summary = []

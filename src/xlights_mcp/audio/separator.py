@@ -7,6 +7,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from xlights_mcp.audio.cache import file_content_hash
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,12 +20,18 @@ class StemPaths(BaseModel):
     bass: str = ""
     other: str = ""
     available: bool = False
+    # True when Demucs was importable but separation itself raised (CUDA OOM, a
+    # corrupt model download, a subprocess crash, ...). False + available=False
+    # means Demucs simply isn't installed -- a stable, cacheable outcome rather
+    # than a transient failure worth retrying.
+    failed: bool = False
 
 
 def separate_stems(
     audio_path: Path,
     output_dir: Path | None = None,
     model: str = "htdemucs",
+    content_hash: str | None = None,
 ) -> StemPaths:
     """Separate audio into stems using Demucs.
 
@@ -34,6 +42,7 @@ def separate_stems(
         audio_path: Path to audio file
         output_dir: Where to save stems (defaults to audio_cache)
         model: Demucs model name
+        content_hash: Precomputed file_content_hash(audio_path), to avoid re-reading the file
     """
     try:
         import torch
@@ -43,12 +52,19 @@ def separate_stems(
             "Demucs not installed. Install with: pip install xlights-mcp-server[separation]"
         )
         return StemPaths(available=False)
+    except Exception as e:  # noqa: BLE001 - e.g. a torch DLL that fails to load
+        # A broken install is as permanent as a missing one: report "not
+        # installed" (cacheable) rather than a transient separation failure.
+        logger.warning(f"Demucs/torch failed to import, skipping separation: {e}")
+        return StemPaths(available=False)
 
     if output_dir is None:
         output_dir = audio_path.parent / "stems" / audio_path.stem
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check cache — vocals is the minimum required stem
+    # Check cache — vocals is the minimum required stem. A sidecar hash of the
+    # source audio's content guards against reusing stems for a different file
+    # that happens to share this file's name/path.
     stems = StemPaths(available=True)
     expected = {
         "vocals": output_dir / "vocals.wav",
@@ -56,15 +72,20 @@ def separate_stems(
         "bass": output_dir / "bass.wav",
         "other": output_dir / "other.wav",
     }
+    sidecar = output_dir / "source.sha1"
+    source_hash = content_hash or file_content_hash(audio_path)
 
     vocals_cached = expected["vocals"].exists()
-    if vocals_cached:
+    sidecar_matches = sidecar.exists() and sidecar.read_text(encoding="utf-8").strip() == source_hash
+    if vocals_cached and sidecar_matches:
         logger.info("Using cached stems")
         stems.vocals = str(expected["vocals"])
         for name in ("drums", "bass", "other"):
             if expected[name].exists():
                 setattr(stems, name, str(expected[name]))
         return stems
+    if vocals_cached and not sidecar_matches:
+        logger.info("Cached stems' source audio changed; re-separating")
 
     logger.info(f"Separating stems with {model}: {audio_path}")
 
@@ -116,9 +137,11 @@ def separate_stems(
                     shutil.move(str(src), str(dst))
                     setattr(stems, stem_name, str(dst))
 
+        sidecar.write_text(source_hash, encoding="utf-8")
         logger.info(f"Stems saved to {output_dir}")
     except Exception as e:
         logger.error(f"Stem separation failed: {e}")
         stems.available = False
+        stems.failed = True
 
     return stems

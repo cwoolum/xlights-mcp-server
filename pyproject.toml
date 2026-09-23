@@ -21,7 +21,7 @@ separation = [
     "torch>=2.0.0",
 ]
 beats = [
-    "madmom>=0.16.1",
+    "madmom @ git+https://github.com/CPJKU/madmom.git@27f032e8947204902c675e5e341a3faf5dc86dae",
 ]
 lyrics = [
     "openai-whisper>=20230918",
@@ -46,6 +46,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/xlights_mcp"]
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.uv.extra-build-dependencies]
+madmom = ["cython", "setuptools", "numpy"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100
@@ -53,3 +59,8 @@ line-length = 100
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-m 'not real_backends'"
+markers = [
+    "real_backends: exercises the real demucs/madmom backends (slow, requires them installed); run with -m real_backends",
+    "real_madmom_grid: exercises _madmom_grid's real import/error handling via a fake madmom module in sys.modules; fast, no real backend needed, included in the default run",
+]
