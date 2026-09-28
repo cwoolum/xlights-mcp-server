@@ -193,7 +193,7 @@ In `LightModel`, after `face_definitions`:
         return is_placeholder_name(self.name)
 ```
 
-(Place the property next to the existing `model_category` property.)
+(Place the property next to the existing `model_category` property. Keep two blank lines between the import block and `_PLACEHOLDER_NAME`, or ruff reports I001.)
 
 In `show.py` `load_show_models`, add to the `LightModel(...)` call:
 
@@ -983,7 +983,7 @@ Expected: FAIL (groups include `All`, `House`, … and members aren't resolved t
             return groups, ungrouped, group_categories
 ```
 
-Keep Strategy 2 (prefix fallback) unchanged. Placeholders remain in `ungrouped` here; PR 3 removes this engine path.
+Keep Strategy 2 (prefix fallback) unchanged. Placeholders remain in `ungrouped` here, and this path doesn't read `xlights-mcp.json` overrides; both are acceptable because PR 3 replaces this engine path.
 
 - [ ] **Step 4: Run tests**
 
@@ -1047,3 +1047,5 @@ Expected: all pass; no findings in these files. For `models.py`, `show.py`, `ser
 git add README.md
 git commit -m "Document get_show_layout"
 ```
+
+- [ ] **Step 5: Note for the PR description.** `remap_sequence` now receives the show's groups (it received none on shows that store groups in `<modelGroups>`). Record in the final report: "remap_sequence now matches against the show's model groups as well as models; on the Halloween show that adds 30 groups as candidates." The coordinator puts this in the PR.
