@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel, Field
+
+_PLACEHOLDER_NAME = re.compile(r"d(?:on'?t|o not) map", re.IGNORECASE)
+
+
+def is_placeholder_name(name: str) -> bool:
+    """True for layout-only placeholder models ("Dont Map", "Don't Map", "Do Not Map")."""
+    return bool(_PLACEHOLDER_NAME.search(name))
 
 
 class Controller(BaseModel):
@@ -37,6 +46,11 @@ class LightModel(BaseModel):
     string_type: str = "RGB Nodes"
     submodels: list[SubModel] = Field(default_factory=list)
     face_definitions: list[str] = Field(default_factory=list)  # e.g. ["Standing Snowman Singing Face"]
+    world_pos_y: float | None = None  # height in the layout (WorldPosY)
+
+    @property
+    def is_placeholder(self) -> bool:
+        return is_placeholder_name(self.name)
 
     @property
     def model_category(self) -> str:
