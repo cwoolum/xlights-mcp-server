@@ -272,7 +272,8 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 |------|-------------|
 | `list_shows` | List all configured xLights show folders |
 | `switch_show` | Switch the active show folder |
-| `list_models` | List all light models with type, controller, and category info |
+| `list_models` | List all light models with type, controller, and category info ("Dont Map" placeholders hidden unless `include_placeholders`) |
+| `get_show_layout` | Model groups with a suggested tier (wash / feature / skip), hierarchy, height range and accent props; override tiers in `xlights-mcp.json` in the show folder |
 | `list_controllers` | List controllers with IPs, protocols, and channel counts |
 | `list_sequences` | List all `.xsq` sequence files in the active show |
 | `inspect_sequence` | Show song info, duration, effects, and models used in a sequence |
