@@ -75,6 +75,7 @@ def test_submodel_members_map_to_their_parent_model():
     rows = _groups()["Pipe Rows"]
 
     assert rows.has_submodels is True
+    assert rows.submodel_count == 2
     assert rows.leaf_models == ["Pipe 1", "Pipe 2"]
 
 
@@ -94,7 +95,7 @@ def test_load_model_groups_returns_resolved_groups():
 def test_model_group_still_constructs_with_name_and_members_only():
     group = ModelGroup(name="All Arches", members=["Arch 1"])
 
-    assert group.leaf_models == [] and group.child_groups == [] and group.has_submodels is False
+    assert group.leaf_models == [] and group.child_groups == [] and group.has_submodels is False and group.submodel_count == 0
 
 
 def test_everything_flat_excludes_placeholder():
@@ -113,6 +114,18 @@ def test_normal_group_has_no_submodels():
     groups = _groups()
 
     assert groups["Lanterns"].has_submodels is False
+    assert groups["Lanterns"].submodel_count == 0
+
+
+def test_submodel_count_counts_only_submodel_members(tmp_path):
+    show = _show_with_extra(
+        tmp_path, extra_group='<modelGroup name="Mixed" models="Pipe 1,Pipe 2,Pipe 3,Pipe 4/Top"/>'
+    )
+
+    mixed = _groups_for(show)["Mixed"]
+
+    assert mixed.has_submodels is True
+    assert mixed.submodel_count == 1
 
 
 def _show_with_extra(tmp_path: Path, extra_model: str = "", extra_group: str = "") -> Path:

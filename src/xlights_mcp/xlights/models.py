@@ -81,6 +81,7 @@ class ModelGroup(BaseModel):
     parent_groups: list[str] = Field(default_factory=list)  # groups listing this one as a member
     leaf_models: list[str] = Field(default_factory=list)  # real models reached through nesting, sorted
     has_submodels: bool = False  # some direct member is a submodel ("Model/Sub")
+    submodel_count: int = 0  # how many direct members are submodels
     grid_size: str = ""
     layout: str = ""
 

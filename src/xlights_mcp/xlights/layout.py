@@ -44,7 +44,7 @@ def classify_groups(
             result[g.name] = ("skip", "empty")
         elif "preview" in g.name.lower():
             result[g.name] = ("skip", "preview-only")
-        elif g.has_submodels:
+        elif g.submodel_count * 2 > len(g.members):
             result[g.name] = ("skip", "submodel group")
         elif len(big_children) >= WASH_MIN_CHILD_GROUPS or share >= WASH_MIN_DISPLAY_SHARE:
             result[g.name] = ("wash", f"{len(big_children)} child groups, {share:.0%} of display")

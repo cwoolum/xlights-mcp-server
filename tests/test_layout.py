@@ -228,3 +228,36 @@ def test_empty_group_overridden_to_feature_warns(tmp_path):
     layout = build_show_layout(load_show_config(show), show)
 
     assert any("Empty is overridden to feature but has no props" in w for w in layout["warnings"])
+
+
+def test_group_with_a_minority_of_submodel_members_is_not_a_submodel_group(tmp_path):
+    show = _show_copy(tmp_path)
+    xml_path = show / "xlights_rgbeffects.xml"
+    xml_path.write_text(
+        xml_path.read_text(encoding="utf-8").replace(
+            "</modelGroups>",
+            '<modelGroup name="Mixed" models="Pipe 1,Pipe 2,Pipe 3,Pipe 4/Top"/></modelGroups>',
+        ),
+        encoding="utf-8",
+    )
+
+    tiers = classify_groups(load_show_config(show))
+
+    assert tiers["Mixed"][1] != "submodel group"
+    assert tiers["Pipe Rows"][1] == "submodel group"
+
+
+def test_group_with_exactly_half_submodel_members_is_not_a_submodel_group(tmp_path):
+    show = _show_copy(tmp_path)
+    xml_path = show / "xlights_rgbeffects.xml"
+    xml_path.write_text(
+        xml_path.read_text(encoding="utf-8").replace(
+            "</modelGroups>",
+            '<modelGroup name="Half" models="Pipe 1,Pipe 2,Pipe 3/Top,Pipe 4/Top"/></modelGroups>',
+        ),
+        encoding="utf-8",
+    )
+
+    tiers = classify_groups(load_show_config(show))
+
+    assert tiers["Half"][1] != "submodel group"

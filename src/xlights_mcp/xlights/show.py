@@ -178,7 +178,8 @@ def _load_groups(show_path: Path, models: list[LightModel]) -> tuple[list[ModelG
     real_models = {m.name for m in models if not m.is_placeholder}
     for g in groups.values():
         g.child_groups = [m for m in g.members if m in groups]
-        g.has_submodels = any(_is_submodel_ref(m, groups, all_model_names) for m in g.members)
+        g.submodel_count = sum(_is_submodel_ref(m, groups, all_model_names) for m in g.members)
+        g.has_submodels = g.submodel_count > 0
         for member in g.members:
             if (
                 member not in groups
