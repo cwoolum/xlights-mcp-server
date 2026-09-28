@@ -347,24 +347,28 @@ def _detect_model_groups(
     """
     model_by_name: dict[str, LightModel] = {m.name: m for m in models}
 
-    # --- Strategy 1: Use xLights-defined model groups ---
+    # --- Strategy 1: xLights-defined feature-tier groups ---
     if show_config.model_groups:
+        from xlights_mcp.xlights.layout import classify_groups
+
+        tiers = classify_groups(show_config)
         groups: dict[str, list[LightModel]] = {}
         group_categories: dict[str, str] = {}
         grouped_names: set[str] = set()
 
         for mg in show_config.model_groups:
-            members = [model_by_name[n] for n in mg.members if n in model_by_name]
+            if tiers[mg.name][0] != "feature":
+                continue
+            members = [model_by_name[n] for n in mg.leaf_models if n in model_by_name]
             if len(members) >= 2:
                 groups[mg.name] = members
                 grouped_names.update(m.name for m in members)
-                # Derive category from majority of member model categories
                 cats = [m.model_category for m in members]
                 group_categories[mg.name] = max(set(cats), key=cats.count)
 
         if groups:
             ungrouped = [m for m in models if m.name not in grouped_names]
-            logger.info(f"Using {len(groups)} xLights-defined model groups")
+            logger.info(f"Using {len(groups)} xLights feature-tier groups")
             return groups, ungrouped, group_categories
 
     # --- Strategy 2: Automatic common-prefix grouping ---
