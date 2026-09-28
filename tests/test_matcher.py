@@ -98,6 +98,15 @@ class TestBuildCandidates:
         assert cands[0].source == "user"
         assert cands[1].is_group is True
 
+    def test_user_show_placeholders_are_not_candidates(self):
+        models = [
+            LightModel(name="Mega Tree", display_as="Tree", pixel_count=1000),
+            LightModel(name="Spare - Dont Map", display_as="Single Line"),
+            LightModel(name="Roof Mid - Null - Do Not Map", display_as="Single Line"),
+        ]
+        cands = build_candidates_from_user_show(models, [])
+        assert [c.name for c in cands] == ["Mega Tree"]
+
     def test_from_import_no_meta(self):
         cands = build_candidates_from_import(["A", "B"])
         assert len(cands) == 2

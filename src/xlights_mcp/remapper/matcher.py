@@ -60,10 +60,15 @@ def build_candidates_from_user_show(
     models: list[LightModel],
     groups: list[ModelGroup],
 ) -> list[MatchCandidate]:
-    """Convert user's LightModel/ModelGroup lists into MatchCandidates."""
+    """Convert user's LightModel/ModelGroup lists into MatchCandidates.
+
+    Placeholder models (Dont Map, Do Not Map) carry no lights and are never offered.
+    """
     candidates: list[MatchCandidate] = []
 
     for m in models:
+        if m.is_placeholder:
+            continue
         candidates.append(
             MatchCandidate(
                 name=m.name,
