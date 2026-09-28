@@ -23,19 +23,18 @@ def load_show_config(show_path: Path) -> ShowConfig:
     Reads xlights_networks.xml and xlights_rgbeffects.xml to build
     a complete picture of the controllers, models, and groups.
     """
-    show_name = show_path.name
     controllers = load_show_controllers(show_path)
     models = load_show_models(show_path)
-    groups = load_model_groups(show_path)
-    total_channels = sum(c.max_channels for c in controllers)
+    groups, warnings = _load_groups(show_path, models)
 
     return ShowConfig(
         show_path=str(show_path),
-        show_name=show_name,
+        show_name=show_path.name,
         controllers=controllers,
         models=models,
         model_groups=groups,
-        total_channels=total_channels,
+        total_channels=sum(c.max_channels for c in controllers),
+        warnings=warnings,
     )
 
 
@@ -140,32 +139,66 @@ def load_show_models(show_path: Path) -> list[LightModel]:
 
 
 def load_model_groups(show_path: Path) -> list[ModelGroup]:
-    """Parse model groups from xlights_rgbeffects.xml."""
+    """Parse and resolve model groups from xlights_rgbeffects.xml."""
+    groups, _ = _load_groups(show_path, load_show_models(show_path))
+    return groups
+
+
+def _load_groups(show_path: Path, models: list[LightModel]) -> tuple[list[ModelGroup], list[str]]:
     effects_file = show_path / "xlights_rgbeffects.xml"
     if not effects_file.exists():
-        return []
+        return [], []
+    root = ET.parse(effects_file).getroot()
 
-    tree = ET.parse(effects_file)
-    root = tree.getroot()
-    models_elem = root.find("models")
-    if models_elem is None:
-        return []
+    # xLights keeps groups in <modelGroups>; older files put them inside <models>.
+    elements = []
+    for container in ("modelGroups", "models"):
+        parent = root.find(container)
+        if parent is not None:
+            elements.extend(e for e in parent if e.tag == "modelGroup")
 
-    groups = []
-    for m in models_elem:
-        if m.tag == "modelGroup":
-            members_str = m.get("models", "")
-            members = [name.strip() for name in members_str.split(",") if name.strip()]
-            group = ModelGroup(
-                name=m.get("name", ""),
-                members=members,
-                grid_size=m.get("GridSize", ""),
-                layout=m.get("layout", ""),
-            )
-            groups.append(group)
+    warnings: list[str] = []
+    groups: dict[str, ModelGroup] = {}
+    for e in elements:
+        name = e.get("name", "")
+        if not name:
+            continue
+        if name in groups:
+            warnings.append(f"Group '{name}' is defined more than once; using the first definition")
+            continue
+        groups[name] = ModelGroup(
+            name=name,
+            members=[n.strip() for n in e.get("models", "").split(",") if n.strip()],
+            grid_size=e.get("GridSize", ""),
+            layout=e.get("layout", ""),
+        )
+
+    real_models = {m.name for m in models if not m.is_placeholder}
+    for g in groups.values():
+        g.child_groups = [m for m in g.members if m in groups]
+        g.has_submodels = any("/" in m for m in g.members)
+    for g in groups.values():
+        g.parent_groups = sorted(p.name for p in groups.values() if g.name in p.child_groups)
+        g.leaf_models = sorted(_leaf_models(g.name, groups, real_models, ()))
 
     logger.info(f"Loaded {len(groups)} model groups from {effects_file}")
-    return groups
+    return list(groups.values()), warnings
+
+
+def _leaf_models(
+    name: str, groups: dict[str, ModelGroup], real_models: set[str], path: tuple[str, ...]
+) -> set[str]:
+    if name in path:  # a group nested inside itself
+        return set()
+    leaves: set[str] = set()
+    for member in groups[name].members:
+        if member in groups:
+            leaves |= _leaf_models(member, groups, real_models, (*path, name))
+        else:
+            model = member.split("/", 1)[0]  # submodels count as their parent model
+            if model in real_models:
+                leaves.add(model)
+    return leaves
 
 
 def _float_or_none(value: str | None) -> float | None:

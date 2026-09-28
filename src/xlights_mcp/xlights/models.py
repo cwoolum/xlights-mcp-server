@@ -76,7 +76,11 @@ class ModelGroup(BaseModel):
     """A group of models that can be controlled together."""
 
     name: str
-    members: list[str] = Field(default_factory=list)
+    members: list[str] = Field(default_factory=list)  # direct members as written in the file
+    child_groups: list[str] = Field(default_factory=list)  # direct members that are groups
+    parent_groups: list[str] = Field(default_factory=list)  # groups listing this one as a member
+    leaf_models: list[str] = Field(default_factory=list)  # real models reached through nesting, sorted
+    has_submodels: bool = False  # some direct member is a submodel ("Model/Sub")
     grid_size: str = ""
     layout: str = ""
 
@@ -90,6 +94,7 @@ class ShowConfig(BaseModel):
     models: list[LightModel] = Field(default_factory=list)
     model_groups: list[ModelGroup] = Field(default_factory=list)
     total_channels: int = 0
+    warnings: list[str] = Field(default_factory=list)
 
     def get_models_by_controller(self, controller_name: str) -> list[LightModel]:
         """Get all models assigned to a specific controller."""
