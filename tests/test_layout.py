@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
 
-from xlights_mcp.xlights.layout import classify_groups
+from xlights_mcp.xlights.layout import build_show_layout, classify_groups, load_tier_overrides
 from xlights_mcp.xlights.show import load_show_config
 
 SHOW = Path(__file__).parent / "fixtures" / "show_groups"
@@ -61,3 +63,58 @@ def test_override_wins():
 
     assert tiers["Pipes-Odd"] == ("feature", "override")
     assert tiers["All"] == ("skip", "override")
+
+
+def _show_copy(tmp_path: Path, overrides: object | None = None, raw: str | None = None) -> Path:
+    show = tmp_path / "show"
+    show.mkdir()
+    shutil.copy(SHOW / "xlights_rgbeffects.xml", show / "xlights_rgbeffects.xml")
+    if raw is not None:
+        (show / "xlights-mcp.json").write_text(raw, encoding="utf-8")
+    elif overrides is not None:
+        (show / "xlights-mcp.json").write_text(json.dumps(overrides), encoding="utf-8")
+    return show
+
+
+def test_no_override_file_means_no_overrides(tmp_path):
+    assert load_tier_overrides(_show_copy(tmp_path)) == ({}, [])
+
+
+def test_override_file_invalid_tier_is_ignored_with_warning(tmp_path):
+    show = _show_copy(tmp_path, {"tiers": {"Pipes-Odd": "feature", "Door": "sparkly"}})
+
+    overrides, warnings = load_tier_overrides(show)
+
+    assert overrides == {"Pipes-Odd": "feature"}
+    assert any("'Door'" in w and "sparkly" in w for w in warnings)
+
+
+def test_override_file_bad_json_warns(tmp_path):
+    overrides, warnings = load_tier_overrides(_show_copy(tmp_path, raw="{not json"))
+
+    assert overrides == {}
+    assert warnings and "xlights-mcp.json" in warnings[0]
+
+
+def test_layout_payload(tmp_path):
+    show = _show_copy(tmp_path, {"tiers": {"Pipes-Odd": "feature", "Nope": "skip"}})
+
+    layout = build_show_layout(load_show_config(show), show)
+    groups = {g["name"]: g for g in layout["groups"]}
+
+    assert layout["model_count"] == 26
+    assert layout["placeholder_count"] == 2
+    assert layout["ungrouped_models"] == ["Tree 6ft"]
+    assert [g["tier"] for g in layout["groups"]] == sorted(
+        (g["tier"] for g in layout["groups"]), key=["wash", "feature", "skip"].index
+    )
+    assert groups["Pipes-Odd"]["tier"] == "feature"
+    assert groups["Roof Edges"]["accent_props"] == ["Roof Left", "Roof Right", "Under Left", "Under Right"]
+    assert groups["Pipes"]["accent_props"] == []
+    assert groups["Under Roof"]["accent_props"] == []
+    assert groups["Roof Edges"]["y_range"] == [120.0, 150.0]
+    assert groups["Roof Edges"]["prop_count"] == 4
+    assert groups["Roof Edges"]["parent_groups"] == ["House"]
+    assert groups["Empty"]["y_range"] is None
+    assert any("'Nope'" in w for w in layout["warnings"])
+    assert any("'Door'" in w and "more than once" in w for w in layout["warnings"])

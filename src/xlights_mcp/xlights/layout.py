@@ -9,7 +9,11 @@ docs/superpowers/specs/2026-09-28-group-sequencing-design.md, "Tiers".
 
 from __future__ import annotations
 
-from typing import Literal
+import json
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import BaseModel
 
 from xlights_mcp.xlights.models import ModelGroup, ShowConfig
 
@@ -63,3 +67,82 @@ def _smallest_superset(group: ModelGroup, candidates: list[ModelGroup]) -> Model
     leaves = set(group.leaf_models)
     supersets = [c for c in candidates if c.name != group.name and leaves < set(c.leaf_models)]
     return min(supersets, key=lambda c: (len(c.leaf_models), c.name), default=None)
+
+
+OVERRIDE_FILE = "xlights-mcp.json"
+ACCENT_MAX_PROPS = 8
+
+
+class GroupLayout(BaseModel):
+    name: str
+    tier: Tier
+    reason: str
+    child_groups: list[str]
+    parent_groups: list[str]
+    prop_count: int
+    y_range: tuple[float, float] | None
+    accent_props: list[str]
+
+
+def load_tier_overrides(show_path: Path) -> tuple[dict[str, Tier], list[str]]:
+    """Tier overrides from the show's xlights-mcp.json, plus warnings for bad entries."""
+    path = show_path / OVERRIDE_FILE
+    if not path.exists():
+        return {}, []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return {}, [f"Ignoring {OVERRIDE_FILE}: {e}"]
+    tiers = data.get("tiers", {}) if isinstance(data, dict) else None
+    if not isinstance(tiers, dict):
+        return {}, [f"Ignoring {OVERRIDE_FILE}: expected {{\"tiers\": {{group: tier}}}}"]
+
+    overrides: dict[str, Tier] = {}
+    warnings: list[str] = []
+    for name, tier in tiers.items():
+        if tier in TIERS:
+            overrides[name] = tier
+        else:
+            warnings.append(f"{OVERRIDE_FILE}: group '{name}' has unknown tier '{tier}' (use {', '.join(TIERS)})")
+    return overrides, warnings
+
+
+def build_show_layout(show: ShowConfig, show_path: Path) -> dict[str, Any]:
+    """The get_show_layout payload: tiers, hierarchy, heights, accent props, warnings."""
+    overrides, warnings = load_tier_overrides(show_path)
+    names = {g.name for g in show.model_groups}
+    for name in overrides:
+        if name not in names:
+            warnings.append(f"{OVERRIDE_FILE}: no group named '{name}'")
+    overrides = {n: t for n, t in overrides.items() if n in names}
+    tiers = classify_groups(show, overrides)
+
+    height = {m.name: m.world_pos_y for m in show.models}
+    rows = []
+    for g in show.model_groups:
+        tier, reason = tiers[g.name]
+        ys = [height[m] for m in g.leaf_models if height.get(m) is not None]
+        rows.append(
+            GroupLayout(
+                name=g.name,
+                tier=tier,
+                reason=reason,
+                child_groups=g.child_groups,
+                parent_groups=g.parent_groups,
+                prop_count=len(g.leaf_models),
+                y_range=(min(ys), max(ys)) if ys else None,
+                accent_props=g.leaf_models if tier == "feature" and len(g.leaf_models) <= ACCENT_MAX_PROPS else [],
+            )
+        )
+    rows.sort(key=lambda r: (TIERS.index(r.tier), r.name.lower()))
+
+    real = [m.name for m in show.models if not m.is_placeholder]
+    grouped = {leaf for g in show.model_groups for leaf in g.leaf_models}
+    return {
+        "show": show.show_name,
+        "model_count": len(real),
+        "placeholder_count": len(show.models) - len(real),
+        "groups": [r.model_dump(mode="json") for r in rows],
+        "ungrouped_models": sorted(n for n in real if n not in grouped),
+        "warnings": [*show.warnings, *warnings],
+    }
