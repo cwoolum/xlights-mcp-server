@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import math
 import xml.etree.ElementTree as ET
+from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
 
 from xlights_mcp.xlights.models import (
@@ -178,59 +180,68 @@ def _load_groups(root: ET.Element, models: list[LightModel]) -> tuple[list[Model
         )
 
     all_model_names = {m.name for m in models}
-    real_models = {m.name for m in models if not m.is_placeholder}
+    parents: defaultdict[str, set[str]] = defaultdict(set)
     for g in groups.values():
-        g.child_groups = [m for m in g.members if m in groups]
-        g.submodel_count = sum(_is_submodel_ref(m, groups, all_model_names) for m in g.members)
-        g.has_submodels = g.submodel_count > 0
         for member in g.members:
-            if (
-                member not in groups
-                and member not in all_model_names
-                and not _is_submodel_ref(member, groups, all_model_names)
-            ):
+            if member in groups:
+                g.child_groups.append(member)
+                parents[member].add(g.name)
+            elif member in all_model_names:
+                continue
+            elif _is_submodel_ref(member, all_model_names):
+                g.submodel_count += 1
+            else:
                 warnings.append(f"Group '{g.name}' lists unknown member '{member}'")
+
+    real_models = {m.name for m in models if not m.is_placeholder}
+    leaves_of = _leaf_resolver(groups, real_models, all_model_names)
     for g in groups.values():
-        g.parent_groups = sorted(p.name for p in groups.values() if g.name in p.child_groups)
-        g.leaf_models = sorted(_leaf_models(g.name, groups, real_models, all_model_names, ()))
+        g.has_submodels = g.submodel_count > 0
+        g.parent_groups = sorted(parents[g.name])
+        g.leaf_models = sorted(leaves_of(g.name))
 
     logger.info(f"Loaded {len(groups)} model groups")
     return list(groups.values()), warnings
 
 
-def _is_submodel_ref(member: str, groups: dict[str, ModelGroup], all_model_names: set[str]) -> bool:
-    """True when `member` looks like "Model/Sub" and isn't itself a known model or group."""
-    return (
-        "/" in member
-        and member not in all_model_names
-        and member not in groups
-        and member.split("/", 1)[0] in all_model_names
-    )
+def _is_submodel_ref(member: str, all_model_names: set[str]) -> bool:
+    """True when `member` looks like "Model/Sub" for a known model."""
+    return "/" in member and member.split("/", 1)[0] in all_model_names
 
 
-def _leaf_models(
-    name: str,
-    groups: dict[str, ModelGroup],
-    real_models: set[str],
-    all_model_names: set[str],
-    path: tuple[str, ...],
-) -> set[str]:
-    if name in path:  # a group nested inside itself
-        return set()
-    leaves: set[str] = set()
-    for member in groups[name].members:
-        if member in groups:
-            leaves |= _leaf_models(member, groups, real_models, all_model_names, (*path, name))
-            continue
-        if member in all_model_names:
-            model = member  # a real model name, even one containing "/"
-        elif "/" in member:
-            model = member.split("/", 1)[0]  # submodels count as their parent model
-        else:
-            continue  # unknown member; already warned about in _load_groups
-        if model in real_models:
-            leaves.add(model)
-    return leaves
+def _leaf_resolver(
+    groups: dict[str, ModelGroup], real_models: set[str], all_model_names: set[str]
+) -> Callable[[str], set[str]]:
+    """Function giving the real models each group reaches through nesting, memoized per group."""
+    memo: dict[str, set[str]] = {}
+    cycle_cuts = 0
+
+    def resolve(name: str, path: tuple[str, ...]) -> set[str]:
+        nonlocal cycle_cuts
+        if name in memo:
+            return memo[name]
+        if name in path:
+            cycle_cuts += 1
+            return set()
+        cuts_before = cycle_cuts
+        leaves: set[str] = set()
+        for member in groups[name].members:
+            if member in groups:
+                leaves |= resolve(member, (*path, name))
+                continue
+            if member in all_model_names:
+                model = member
+            elif "/" in member:
+                model = member.split("/", 1)[0]
+            else:
+                continue
+            if model in real_models:
+                leaves.add(model)
+        if cycle_cuts == cuts_before:
+            memo[name] = leaves
+        return leaves
+
+    return lambda name: resolve(name, ())
 
 
 def _float_or_none(value: str | None) -> float | None:
