@@ -196,7 +196,6 @@ def _load_groups(root: ET.Element, models: list[LightModel]) -> tuple[list[Model
     real_models = {m.name for m in models if not m.is_placeholder}
     leaves_of = _leaf_resolver(groups, real_models, all_model_names)
     for g in groups.values():
-        g.has_submodels = g.submodel_count > 0
         g.parent_groups = sorted(parents[g.name])
         g.leaf_models = sorted(leaves_of(g.name))
 

@@ -80,10 +80,13 @@ class ModelGroup(BaseModel):
     child_groups: list[str] = Field(default_factory=list)  # direct members that are groups
     parent_groups: list[str] = Field(default_factory=list)  # groups listing this one as a member
     leaf_models: list[str] = Field(default_factory=list)  # real models reached through nesting, sorted
-    has_submodels: bool = False  # some direct member is a submodel ("Model/Sub")
-    submodel_count: int = 0  # how many direct members are submodels
+    submodel_count: int = 0
     grid_size: str = ""
     layout: str = ""
+
+    @property
+    def has_submodels(self) -> bool:
+        return self.submodel_count > 0
 
 
 class ShowConfig(BaseModel):
