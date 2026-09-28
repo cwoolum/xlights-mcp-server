@@ -25,7 +25,7 @@ from pathlib import Path
 from xlights_mcp.audio.analyzer import ProgressCallback, SongAnalysis, StemAnalysis, full_analysis
 from xlights_mcp.audio.structure import SongSection
 from xlights_mcp.config import AudioConfig
-from xlights_mcp.xlights.layout import classify_groups, load_tier_overrides
+from xlights_mcp.xlights.layout import show_tiers
 from xlights_mcp.xlights.models import LightModel, ShowConfig
 from xlights_mcp.xlights.palettes import ColorPalette, get_theme_palettes
 from xlights_mcp.xlights.show import load_show_config
@@ -351,8 +351,9 @@ def _detect_model_groups(
 
     # --- Strategy 1: xLights-defined feature-tier groups ---
     if show_config.model_groups:
-        overrides, _ = load_tier_overrides(Path(show_config.show_path))
-        tiers = classify_groups(show_config, overrides)
+        tiers, tier_warnings = show_tiers(show_config)
+        for warning in tier_warnings:
+            logger.info(warning)
         groups: dict[str, list[LightModel]] = {}
         group_categories: dict[str, str] = {}
         grouped_names: set[str] = set()

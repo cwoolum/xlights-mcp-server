@@ -99,7 +99,7 @@ def test_override_file_bad_json_warns(tmp_path):
 def test_layout_payload(tmp_path):
     show = _show_copy(tmp_path, {"tiers": {"Pipes-Odd": "feature", "Nope": "skip"}})
 
-    layout = build_show_layout(load_show_config(show), show)
+    layout = build_show_layout(load_show_config(show))
     groups = {g["name"]: g for g in layout["groups"]}
 
     assert layout["model_count"] == 26
@@ -217,7 +217,7 @@ def test_y_range_is_rounded_and_ignores_non_finite_heights(tmp_path):
         if m.name in heights:
             m.world_pos_y = heights[m.name]
 
-    groups = {g["name"]: g for g in build_show_layout(config, show)["groups"]}
+    groups = {g["name"]: g for g in build_show_layout(config)["groups"]}
 
     assert groups["Lanterns"]["y_range"] == [0.0, 90.0]
 
@@ -225,7 +225,7 @@ def test_y_range_is_rounded_and_ignores_non_finite_heights(tmp_path):
 def test_empty_group_overridden_to_feature_warns(tmp_path):
     show = _show_copy(tmp_path, {"tiers": {"Empty": "feature"}})
 
-    layout = build_show_layout(load_show_config(show), show)
+    layout = build_show_layout(load_show_config(show))
 
     assert any("Empty is overridden to feature but has no props" in w for w in layout["warnings"])
 

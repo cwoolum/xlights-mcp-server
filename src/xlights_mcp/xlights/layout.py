@@ -32,6 +32,7 @@ def classify_groups(
     overrides = overrides or {}
     by_name = {g.name: g for g in show.model_groups}
     display_size = len(show.real_models)
+    leaf_sets = {g.name: frozenset(g.leaf_models) for g in show.model_groups}
     result: dict[str, tuple[Tier, str]] = {}
 
     for g in show.model_groups:
@@ -60,8 +61,8 @@ def classify_groups(
         if len(g.leaf_models) < 2:
             result[g.name] = ("skip", "single prop")
             continue
-        parent = _smallest_superset(g, candidates)
-        twin = _first_named_twin(g, candidates)
+        parent = _smallest_superset(g, candidates, leaf_sets)
+        twin = _first_named_twin(g, candidates, leaf_sets)
         if parent is not None:
             result[g.name] = ("skip", f"part of {parent.name}")
         elif twin is not None:
@@ -75,18 +76,22 @@ def _name_order(group: ModelGroup) -> tuple[str, str]:
     return (group.name.lower(), group.name)
 
 
-def _smallest_superset(group: ModelGroup, candidates: list[ModelGroup]) -> ModelGroup | None:
-    leaves = set(group.leaf_models)
-    supersets = [c for c in candidates if c.name != group.name and leaves < set(c.leaf_models)]
-    return min(supersets, key=lambda c: (len(c.leaf_models), *_name_order(c)), default=None)
+def _smallest_superset(
+    group: ModelGroup, candidates: list[ModelGroup], leaf_sets: dict[str, frozenset[str]]
+) -> ModelGroup | None:
+    leaves = leaf_sets[group.name]
+    supersets = [c for c in candidates if c.name != group.name and leaves < leaf_sets[c.name]]
+    return min(supersets, key=lambda c: (len(leaf_sets[c.name]), *_name_order(c)), default=None)
 
 
-def _first_named_twin(group: ModelGroup, candidates: list[ModelGroup]) -> ModelGroup | None:
-    leaves = set(group.leaf_models)
+def _first_named_twin(
+    group: ModelGroup, candidates: list[ModelGroup], leaf_sets: dict[str, frozenset[str]]
+) -> ModelGroup | None:
+    leaves = leaf_sets[group.name]
     twins = [
         c
         for c in candidates
-        if c.name != group.name and leaves == set(c.leaf_models) and _name_order(c) < _name_order(group)
+        if c.name != group.name and leaves == leaf_sets[c.name] and _name_order(c) < _name_order(group)
     ]
     return min(twins, key=_name_order, default=None)
 
@@ -130,18 +135,24 @@ def load_tier_overrides(show_path: Path) -> tuple[dict[str, Tier], list[str]]:
     return overrides, warnings
 
 
-def build_show_layout(show: ShowConfig, show_path: Path) -> dict[str, Any]:
-    """The get_show_layout payload: tiers, hierarchy, heights, accent props, warnings."""
-    overrides, warnings = load_tier_overrides(show_path)
+def show_tiers(show: ShowConfig) -> tuple[dict[str, tuple[Tier, str]], list[str]]:
+    """Tier and reason for every group, honoring the show's overrides, plus warnings about them."""
+    overrides, warnings = load_tier_overrides(Path(show.show_path))
     names = {g.name for g in show.model_groups}
-    for name in overrides:
-        if name not in names:
-            warnings.append(f"{OVERRIDE_FILE}: no group named '{name}'")
+    warnings.extend(f"{OVERRIDE_FILE}: no group named '{name}'" for name in overrides if name not in names)
     overrides = {n: t for n, t in overrides.items() if n in names}
     tiers = classify_groups(show, overrides)
-    for g in show.model_groups:
-        if overrides.get(g.name) == "feature" and not g.leaf_models:
-            warnings.append(f"{g.name} is overridden to feature but has no props")
+    warnings.extend(
+        f"{g.name} is overridden to feature but has no props"
+        for g in show.model_groups
+        if overrides.get(g.name) == "feature" and not g.leaf_models
+    )
+    return tiers, warnings
+
+
+def build_show_layout(show: ShowConfig) -> dict[str, Any]:
+    """The get_show_layout payload: tiers, hierarchy, heights, accent props, warnings."""
+    tiers, warnings = show_tiers(show)
 
     height = {m.name: m.world_pos_y for m in show.models}
     rows = []

@@ -241,7 +241,7 @@ def get_show_layout(show_name: str | None = None) -> dict:
                 "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
             }
 
-    layout = build_show_layout(load_show_config(show_path), show_path)
+    layout = build_show_layout(load_show_config(show_path))
     layout["show"] = show_name or config.active_show
     return layout
 
