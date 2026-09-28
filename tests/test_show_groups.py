@@ -36,12 +36,8 @@ def test_models_carry_height_and_placeholder_flag():
     assert models["Roof Left"].is_placeholder is False
 
 
-def _groups():
-    return {g.name: g for g in load_show_config(SHOW).model_groups}
-
-
 def test_groups_come_from_modelgroups_and_the_legacy_models_section():
-    groups = _groups()
+    groups = _groups_for(SHOW)
 
     assert "All" in groups and "Legacy Arches" in groups
     assert len(groups) == 16  # 17 definitions, one duplicate
@@ -56,7 +52,7 @@ def test_duplicate_group_name_keeps_first_definition_and_warns():
 
 
 def test_nested_groups_resolve_to_real_leaf_models():
-    groups = _groups()
+    groups = _groups_for(SHOW)
 
     assert groups["Roof Edges"].leaf_models == ["Roof Left", "Roof Right", "Under Left", "Under Right"]
     assert groups["House"].leaf_models == ["Door L", "Door R", "Roof Left", "Roof Right", "Under Left", "Under Right"]
@@ -64,7 +60,7 @@ def test_nested_groups_resolve_to_real_leaf_models():
 
 
 def test_child_and_parent_groups():
-    groups = _groups()
+    groups = _groups_for(SHOW)
 
     assert groups["Roof Edges"].child_groups == ["Under Roof"]
     assert groups["Under Roof"].parent_groups == ["Roof Edges"]
@@ -72,7 +68,7 @@ def test_child_and_parent_groups():
 
 
 def test_submodel_members_map_to_their_parent_model():
-    rows = _groups()["Pipe Rows"]
+    rows = _groups_for(SHOW)["Pipe Rows"]
 
     assert rows.has_submodels is True
     assert rows.submodel_count == 2
@@ -80,7 +76,7 @@ def test_submodel_members_map_to_their_parent_model():
 
 
 def test_group_cycles_terminate():
-    groups = _groups()
+    groups = _groups_for(SHOW)
 
     assert groups["Cycle A"].leaf_models == ["Door L"]
     assert groups["Cycle B"].leaf_models == ["Door L"]
@@ -99,19 +95,19 @@ def test_model_group_still_constructs_with_name_and_members_only():
 
 
 def test_everything_flat_excludes_placeholder():
-    groups = _groups()
+    groups = _groups_for(SHOW)
 
     assert "Spare - Dont Map" not in groups["Everything Flat"].leaf_models
 
 
 def test_roof_edges_parent_groups():
-    groups = _groups()
+    groups = _groups_for(SHOW)
 
     assert groups["Roof Edges"].parent_groups == ["House"]
 
 
 def test_normal_group_has_no_submodels():
-    groups = _groups()
+    groups = _groups_for(SHOW)
 
     assert groups["Lanterns"].has_submodels is False
     assert groups["Lanterns"].submodel_count == 0

@@ -6,7 +6,12 @@ import json
 import shutil
 from pathlib import Path
 
-from xlights_mcp.xlights.layout import build_show_layout, classify_groups, load_tier_overrides
+from xlights_mcp.xlights.layout import (
+    TIERS,
+    build_show_layout,
+    classify_groups,
+    load_tier_overrides,
+)
 from xlights_mcp.xlights.show import load_show_config
 
 SHOW = Path(__file__).parent / "fixtures" / "show_groups"
@@ -106,7 +111,7 @@ def test_layout_payload(tmp_path):
     assert layout["placeholder_count"] == 2
     assert layout["ungrouped_models"] == ["Tree 6ft"]
     assert [g["tier"] for g in layout["groups"]] == sorted(
-        (g["tier"] for g in layout["groups"]), key=["wash", "feature", "skip"].index
+        (g["tier"] for g in layout["groups"]), key=TIERS.index
     )
     assert groups["Pipes-Odd"]["tier"] == "feature"
     assert groups["Roof Edges"]["accent_props"] == ["Roof Left", "Roof Right", "Under Left", "Under Right"]
@@ -231,15 +236,7 @@ def test_empty_group_overridden_to_feature_warns(tmp_path):
 
 
 def test_group_with_a_minority_of_submodel_members_is_not_a_submodel_group(tmp_path):
-    show = _show_copy(tmp_path)
-    xml_path = show / "xlights_rgbeffects.xml"
-    xml_path.write_text(
-        xml_path.read_text(encoding="utf-8").replace(
-            "</modelGroups>",
-            '<modelGroup name="Mixed" models="Pipe 1,Pipe 2,Pipe 3,Pipe 4/Top"/></modelGroups>',
-        ),
-        encoding="utf-8",
-    )
+    show = _fixture_with_groups(tmp_path, '<modelGroup name="Mixed" models="Pipe 1,Pipe 2,Pipe 3,Pipe 4/Top"/>')
 
     tiers = classify_groups(load_show_config(show))
 
@@ -248,15 +245,7 @@ def test_group_with_a_minority_of_submodel_members_is_not_a_submodel_group(tmp_p
 
 
 def test_group_with_exactly_half_submodel_members_is_not_a_submodel_group(tmp_path):
-    show = _show_copy(tmp_path)
-    xml_path = show / "xlights_rgbeffects.xml"
-    xml_path.write_text(
-        xml_path.read_text(encoding="utf-8").replace(
-            "</modelGroups>",
-            '<modelGroup name="Half" models="Pipe 1,Pipe 2,Pipe 3/Top,Pipe 4/Top"/></modelGroups>',
-        ),
-        encoding="utf-8",
-    )
+    show = _fixture_with_groups(tmp_path, '<modelGroup name="Half" models="Pipe 1,Pipe 2,Pipe 3/Top,Pipe 4/Top"/>')
 
     tiers = classify_groups(load_show_config(show))
 
