@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -160,7 +161,7 @@ def _load_groups(show_path: Path, models: list[LightModel]) -> tuple[list[ModelG
     warnings: list[str] = []
     groups: dict[str, ModelGroup] = {}
     for e in elements:
-        name = e.get("name", "")
+        name = e.get("name", "").strip()
         if not name:
             continue
         if name in groups:
@@ -173,36 +174,64 @@ def _load_groups(show_path: Path, models: list[LightModel]) -> tuple[list[ModelG
             layout=e.get("layout", ""),
         )
 
+    all_model_names = {m.name for m in models}
     real_models = {m.name for m in models if not m.is_placeholder}
     for g in groups.values():
         g.child_groups = [m for m in g.members if m in groups]
-        g.has_submodels = any("/" in m for m in g.members)
+        g.has_submodels = any(_is_submodel_ref(m, groups, all_model_names) for m in g.members)
+        for member in g.members:
+            if (
+                member not in groups
+                and member not in all_model_names
+                and not _is_submodel_ref(member, groups, all_model_names)
+            ):
+                warnings.append(f"Group '{g.name}' lists unknown member '{member}'")
     for g in groups.values():
         g.parent_groups = sorted(p.name for p in groups.values() if g.name in p.child_groups)
-        g.leaf_models = sorted(_leaf_models(g.name, groups, real_models, ()))
+        g.leaf_models = sorted(_leaf_models(g.name, groups, real_models, all_model_names, ()))
 
     logger.info(f"Loaded {len(groups)} model groups from {effects_file}")
     return list(groups.values()), warnings
 
 
+def _is_submodel_ref(member: str, groups: dict[str, ModelGroup], all_model_names: set[str]) -> bool:
+    """True when `member` looks like "Model/Sub" and isn't itself a known model or group."""
+    return (
+        "/" in member
+        and member not in all_model_names
+        and member not in groups
+        and member.split("/", 1)[0] in all_model_names
+    )
+
+
 def _leaf_models(
-    name: str, groups: dict[str, ModelGroup], real_models: set[str], path: tuple[str, ...]
+    name: str,
+    groups: dict[str, ModelGroup],
+    real_models: set[str],
+    all_model_names: set[str],
+    path: tuple[str, ...],
 ) -> set[str]:
     if name in path:  # a group nested inside itself
         return set()
     leaves: set[str] = set()
     for member in groups[name].members:
         if member in groups:
-            leaves |= _leaf_models(member, groups, real_models, (*path, name))
-        else:
+            leaves |= _leaf_models(member, groups, real_models, all_model_names, (*path, name))
+            continue
+        if member in all_model_names:
+            model = member  # a real model name, even one containing "/"
+        elif "/" in member:
             model = member.split("/", 1)[0]  # submodels count as their parent model
-            if model in real_models:
-                leaves.add(model)
+        else:
+            continue  # unknown member; already warned about in _load_groups
+        if model in real_models:
+            leaves.add(model)
     return leaves
 
 
 def _float_or_none(value: str | None) -> float | None:
     try:
-        return float(value) if value is not None else None
+        result = float(value) if value is not None else None
     except ValueError:
         return None
+    return result if result is None or math.isfinite(result) else None

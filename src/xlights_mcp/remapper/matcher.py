@@ -253,6 +253,8 @@ def _match_similar_word(
         for token in imp_cand.name_tokens:
             for usr_key in user_by_token.get(token, []):
                 usr_cand = user_pool[usr_key]
+                if usr_cand.is_group != imp_cand.is_group:
+                    continue  # a model can only match a model, a group only a group
                 shared = sorted(
                     set(imp_cand.name_tokens) & set(usr_cand.name_tokens)
                 )

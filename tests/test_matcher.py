@@ -187,6 +187,23 @@ class TestMatchSimilarWord:
         mappings = _match_similar_word(imp, usr)
         assert len(mappings) == 0
 
+    def test_model_does_not_match_group(self):
+        """An imported model shouldn't pair with a user group by shared words."""
+        imp = _pool([_make_candidate("Pipes Main", "imported", is_group=False)])
+        usr = _pool([
+            _make_candidate("Pipe 1", "user", is_group=False),
+            _make_candidate("Pipes", "user", is_group=True),
+        ])
+        mappings = _match_similar_word(imp, usr)
+        assert len(mappings) == 0
+
+    def test_group_still_matches_group(self):
+        imp = _pool([_make_candidate("Pipes Group", "imported", is_group=True)])
+        usr = _pool([_make_candidate("Pipes", "user", is_group=True)])
+        mappings = _match_similar_word(imp, usr)
+        assert len(mappings) == 1
+        assert mappings[0].user_name == "Pipes"
+
 
 # ---------------------------------------------------------------------------
 # Priority 3: Model type  (T025)
