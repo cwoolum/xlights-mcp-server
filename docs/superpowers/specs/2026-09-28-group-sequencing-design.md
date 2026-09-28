@@ -99,7 +99,7 @@ Returns, for the active (or named) show:
 ```json
 {
   "show": "halloween",
-  "model_count": 123, "placeholder_count": 5,
+  "model_count": 122, "placeholder_count": 6,
   "groups": [
     {"name": "Roof Edges", "tier": "feature", "reason": "top-level, 9 props",
      "child_groups": ["Under Roof"], "parent_groups": ["House", "All"],
@@ -115,7 +115,7 @@ Returns, for the active (or named) show:
 ## Plan writer: `write_sequence`
 
 ```
-write_sequence(mp3_path: str, plan: list[dict] | None = None, plan_path: str | None = None,
+write_sequence(mp3_path: str, ctx: Context, plan: list[dict] | None = None, plan_path: str | None = None,
                name: str | None = None, timing_tracks: list[str] | None = None,
                overwrite: bool = False, validate_only: bool = False) -> dict
 ```
@@ -230,7 +230,7 @@ Effect names used by the baseline must pass the writer's name check; table entri
 - The `needs_vocal_assignment` early return stays and happens before anything is written.
 - When lyrics are available, the face effects and lyric timing tracks are built as today and passed to the writer as extra placements and pre-built `TimingTrack`s.
 - When lyrics are unavailable, singing models get no effects (the old table-engine fallback for them is removed) and the result carries a warning.
-- Wash/feature groups whose leaf models include a singing model are left out of the baseline when faces are being sequenced, so group effects don't draw over the faces.
+- Wash/feature groups whose leaf models include a singing model are left out of the baseline when faces are being sequenced, so group effects don't draw over the faces. Their accent props are kept only if they aren't singing models. If no wash group remains, intro/outro/breakdown sections get no wash (features stay dark there, as above).
 
 Everything else in the old `_generate_auto` (per-model effect loops, legacy prefix grouping) is removed.
 
@@ -244,7 +244,7 @@ One design, three PRs in order, each leaving the server working:
 ## Other changes
 
 - `list_models(include_placeholders=False)` hides placeholders (#3).
-- `inspect_sequence`, `preview_plan`, `get_energy_profile`, `get_beat_map` sizing (#5–#7, #10) are out of scope (PR C).
+- `inspect_sequence`, `preview_plan`, `get_energy_profile`, `get_beat_map` sizing (#5–#7, #10) are out of scope (a later PR, sharp-edges batch C).
 
 ## Testing
 
