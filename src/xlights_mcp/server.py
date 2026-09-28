@@ -183,10 +183,12 @@ def switch_show(show_name: str) -> dict:
 
 
 @mcp.tool()
-def list_models() -> dict:
+def list_models(include_placeholders: bool = False) -> dict:
     """List all light models in the active xLights show.
 
     Returns model names, types, controller assignments, and channel info.
+    Layout-only placeholder models ("Dont Map", "Do Not Map") are hidden unless
+    include_placeholders is true. Use get_show_layout for groups and tiers.
     """
     from xlights_mcp.xlights.show import load_show_models
 
@@ -198,12 +200,49 @@ def list_models() -> dict:
             "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
         }
 
-    models = load_show_models(show_path)
+    models = [m for m in load_show_models(show_path) if include_placeholders or not m.is_placeholder]
     return {
         "show": config.active_show,
         "model_count": len(models),
         "models": [m.model_dump() for m in models],
     }
+
+
+@mcp.tool()
+def get_show_layout(show_name: str | None = None) -> dict:
+    """Get the show's model groups with a suggested sequencing tier for each.
+
+    Tiers: "wash" = broad parent groups for a base layer (e.g. All, House);
+    "feature" = top-level props that carry motion (e.g. Roof Edges, Pipes);
+    "skip" = empty, preview-only, submodel-row, single-prop groups, or sub-parts
+    of a feature. Every group is still usable by name. Each group lists its child
+    and parent groups, prop count, height range (y_range) and, for small feature
+    groups, accent_props (single props for accents). Tiers can be overridden in
+    xlights-mcp.json in the show folder: {"tiers": {"Group Name": "feature"}}.
+
+    Args:
+        show_name: Show to describe (defaults to the active show)
+    """
+    from xlights_mcp.xlights.layout import build_show_layout
+    from xlights_mcp.xlights.show import load_show_config
+
+    config = get_config()
+    if show_name:
+        resolved = _resolve_show(config, show_name)
+        if isinstance(resolved, dict):
+            return resolved
+        show_path = resolved
+    else:
+        show_path = config.active_show_path
+        if not show_path or not show_path.exists():
+            return {
+                "error": "No active show folder configured.",
+                "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
+            }
+
+    layout = build_show_layout(load_show_config(show_path), show_path)
+    layout["show"] = show_name or config.active_show
+    return layout
 
 
 @mcp.tool()
