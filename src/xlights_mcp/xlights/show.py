@@ -6,7 +6,7 @@ import logging
 import math
 import xml.etree.ElementTree as ET
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from xlights_mcp.xlights.models import (
@@ -155,17 +155,23 @@ def load_model_groups(show_path: Path) -> list[ModelGroup]:
     return groups
 
 
-def _load_groups(root: ET.Element, models: list[LightModel]) -> tuple[list[ModelGroup], list[str]]:
-    # xLights keeps groups in <modelGroups>; older files put them inside <models>.
-    elements = []
+def model_group_elements(root: ET.Element) -> Iterator[ET.Element]:
+    """The <modelGroup> elements: xLights keeps them in <modelGroups>, older files inside <models>."""
     for container in ("modelGroups", "models"):
         parent = root.find(container)
         if parent is not None:
-            elements.extend(e for e in parent if e.tag == "modelGroup")
+            yield from (e for e in parent if e.tag == "modelGroup")
 
+
+def group_members(group_elem: ET.Element) -> list[str]:
+    """Direct member names from a <modelGroup>'s comma-separated models attribute."""
+    return [n.strip() for n in group_elem.get("models", "").split(",") if n.strip()]
+
+
+def _load_groups(root: ET.Element, models: list[LightModel]) -> tuple[list[ModelGroup], list[str]]:
     warnings: list[str] = []
     groups: dict[str, ModelGroup] = {}
-    for e in elements:
+    for e in model_group_elements(root):
         name = e.get("name", "").strip()
         if not name:
             continue
@@ -174,7 +180,7 @@ def _load_groups(root: ET.Element, models: list[LightModel]) -> tuple[list[Model
             continue
         groups[name] = ModelGroup(
             name=name,
-            members=[n.strip() for n in e.get("models", "").split(",") if n.strip()],
+            members=group_members(e),
             grid_size=e.get("GridSize", ""),
             layout=e.get("layout", ""),
         )

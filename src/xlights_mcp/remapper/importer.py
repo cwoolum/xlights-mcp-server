@@ -21,6 +21,7 @@ from xlights_mcp.remapper.models import (
     ImportedModelMeta,
     ImportedSequenceData,
 )
+from xlights_mcp.xlights.show import group_members, model_group_elements
 
 logger = logging.getLogger(__name__)
 
@@ -278,70 +279,54 @@ def _parse_imported_metadata(
     if not rgbeffects_path.exists():
         return []
 
-    tree = etree.parse(str(rgbeffects_path))
-    root = tree.getroot()
-    # xLights keeps groups in <modelGroups>; older files put them inside <models>.
-    elements = []
-    for container in ("models", "modelGroups"):
-        parent = root.find(container)
-        if parent is not None:
-            elements.extend(parent)
-    if not elements:
-        return []
-
+    root = etree.parse(str(rgbeffects_path)).getroot()
     result: list[ImportedModelMeta] = []
 
-    for elem in elements:
-        if elem.tag == "model":
-            name = elem.get("name", "")
-            if not name:
-                continue
+    models_parent = root.find("models")
+    for elem in models_parent if models_parent is not None else ():
+        if elem.tag != "model":
+            continue
+        name = elem.get("name", "")
+        if not name:
+            continue
 
-            display_as = elem.get("DisplayAs", "")
-            pixel_count = 0
-            parm1 = elem.get("parm1", "0")
-            parm2 = elem.get("parm2", "0")
-            pixel_count_attr = elem.get("PixelCount", "")
-            if pixel_count_attr:
-                try:
-                    pixel_count = int(pixel_count_attr)
-                except ValueError:
-                    pass
-            elif parm1 and parm2:
-                try:
-                    pixel_count = int(parm1) * int(parm2)
-                except ValueError:
-                    pass
+        display_as = elem.get("DisplayAs", "")
+        pixel_count = 0
+        parm1 = elem.get("parm1", "0")
+        parm2 = elem.get("parm2", "0")
+        pixel_count_attr = elem.get("PixelCount", "")
+        if pixel_count_attr:
+            try:
+                pixel_count = int(pixel_count_attr)
+            except ValueError:
+                pass
+        elif parm1 and parm2:
+            try:
+                pixel_count = int(parm1) * int(parm2)
+            except ValueError:
+                pass
 
-            face_definitions: list[str] = []
-            for child in elem:
-                if child.tag == "faceInfo":
-                    face_name = child.get("Name", "")
-                    if face_name:
-                        face_definitions.append(face_name)
+        face_definitions: list[str] = []
+        for child in elem:
+            if child.tag == "faceInfo":
+                face_name = child.get("Name", "")
+                if face_name:
+                    face_definitions.append(face_name)
 
-            result.append(
-                ImportedModelMeta(
-                    name=name,
-                    display_as=display_as,
-                    pixel_count=pixel_count,
-                    face_definitions=face_definitions,
-                )
+        result.append(
+            ImportedModelMeta(
+                name=name,
+                display_as=display_as,
+                pixel_count=pixel_count,
+                face_definitions=face_definitions,
             )
+        )
 
-        elif elem.tag == "modelGroup":
-            name = elem.get("name", "")
-            if not name:
-                continue
-            members_str = elem.get("models", "")
-            members = [m.strip() for m in members_str.split(",") if m.strip()]
-            result.append(
-                ImportedModelMeta(
-                    name=name,
-                    is_group=True,
-                    group_members=members,
-                )
-            )
+    for elem in model_group_elements(root):
+        name = elem.get("name", "")
+        if not name:
+            continue
+        result.append(ImportedModelMeta(name=name, is_group=True, group_members=group_members(elem)))
 
     return result
 
