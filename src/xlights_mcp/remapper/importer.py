@@ -280,13 +280,18 @@ def _parse_imported_metadata(
 
     tree = etree.parse(str(rgbeffects_path))
     root = tree.getroot()
-    models_elem = root.find("models")
-    if models_elem is None:
+    # xLights keeps groups in <modelGroups>; older files put them inside <models>.
+    elements = []
+    for container in ("models", "modelGroups"):
+        parent = root.find(container)
+        if parent is not None:
+            elements.extend(parent)
+    if not elements:
         return []
 
     result: list[ImportedModelMeta] = []
 
-    for elem in models_elem:
+    for elem in elements:
         if elem.tag == "model":
             name = elem.get("name", "")
             if not name:

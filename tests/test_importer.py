@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
 import pytest
 from lxml import etree
 
-from xlights_mcp.remapper.importer import parse_xsq, _parse_imported_metadata
+from xlights_mcp.remapper.importer import _parse_imported_metadata, import_package, parse_xsq
 
 FIXTURES = Path(__file__).parent / "fixtures" / "remapping"
 
@@ -114,3 +115,31 @@ class TestParseImportedMetadata:
     def test_nonexistent_file(self):
         result = _parse_imported_metadata(Path("/nonexistent.xml"))
         assert result == []
+
+
+class TestImportPackageModelGroups:
+    def test_groups_in_model_groups_element_are_read(self, tmp_path):
+        rgbeffects = """<?xml version="1.0" encoding="utf-8"?>
+<xrgb>
+  <models>
+    <model name="Arch Left" DisplayAs="Arches"/>
+    <model name="Arch Right" DisplayAs="Arches"/>
+  </models>
+  <modelGroups>
+    <modelGroup name="All Arches" models="Arch Left,Arch Right"/>
+  </modelGroups>
+</xrgb>
+"""
+        zip_path = tmp_path / "package.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.write(FIXTURES / "minimal_sequence.xsq", "minimal_sequence.xsq")
+            zf.writestr("xlights_rgbeffects.xml", rgbeffects)
+        show_dir = tmp_path / "show"
+        show_dir.mkdir()
+
+        _, _, imported_meta, _ = import_package(zip_path, show_dir)
+
+        assert imported_meta is not None
+        group = next(m for m in imported_meta if m.name == "All Arches")
+        assert group.is_group is True
+        assert group.group_members == ["Arch Left", "Arch Right"]
