@@ -25,8 +25,9 @@ def load_show_config(show_path: Path) -> ShowConfig:
     a complete picture of the controllers, models, and groups.
     """
     controllers = load_show_controllers(show_path)
-    models = load_show_models(show_path)
-    groups, warnings = _load_groups(show_path, models)
+    root = _load_effects_root(show_path)
+    models = _parse_models(root)
+    groups, warnings = _load_groups(root, models)
 
     return ShowConfig(
         show_path=str(show_path),
@@ -77,15 +78,21 @@ def load_show_controllers(show_path: Path) -> list[Controller]:
     return controllers
 
 
-def load_show_models(show_path: Path) -> list[LightModel]:
-    """Parse xlights_rgbeffects.xml to extract model definitions."""
+def _load_effects_root(show_path: Path) -> ET.Element:
+    """Root of xlights_rgbeffects.xml, or an empty element when the file is missing."""
     effects_file = show_path / "xlights_rgbeffects.xml"
     if not effects_file.exists():
         logger.warning(f"RGB effects file not found: {effects_file}")
-        return []
+        return ET.Element("xrgb")
+    return ET.parse(effects_file).getroot()
 
-    tree = ET.parse(effects_file)
-    root = tree.getroot()
+
+def load_show_models(show_path: Path) -> list[LightModel]:
+    """Parse xlights_rgbeffects.xml to extract model definitions."""
+    return _parse_models(_load_effects_root(show_path))
+
+
+def _parse_models(root: ET.Element) -> list[LightModel]:
     models_elem = root.find("models")
     if models_elem is None:
         return []
@@ -135,22 +142,18 @@ def load_show_models(show_path: Path) -> list[LightModel]:
             )
             models.append(model)
 
-    logger.info(f"Loaded {len(models)} models from {effects_file}")
+    logger.info(f"Loaded {len(models)} models")
     return models
 
 
 def load_model_groups(show_path: Path) -> list[ModelGroup]:
     """Parse and resolve model groups from xlights_rgbeffects.xml."""
-    groups, _ = _load_groups(show_path, load_show_models(show_path))
+    root = _load_effects_root(show_path)
+    groups, _ = _load_groups(root, _parse_models(root))
     return groups
 
 
-def _load_groups(show_path: Path, models: list[LightModel]) -> tuple[list[ModelGroup], list[str]]:
-    effects_file = show_path / "xlights_rgbeffects.xml"
-    if not effects_file.exists():
-        return [], []
-    root = ET.parse(effects_file).getroot()
-
+def _load_groups(root: ET.Element, models: list[LightModel]) -> tuple[list[ModelGroup], list[str]]:
     # xLights keeps groups in <modelGroups>; older files put them inside <models>.
     elements = []
     for container in ("modelGroups", "models"):
@@ -191,7 +194,7 @@ def _load_groups(show_path: Path, models: list[LightModel]) -> tuple[list[ModelG
         g.parent_groups = sorted(p.name for p in groups.values() if g.name in p.child_groups)
         g.leaf_models = sorted(_leaf_models(g.name, groups, real_models, all_model_names, ()))
 
-    logger.info(f"Loaded {len(groups)} model groups from {effects_file}")
+    logger.info(f"Loaded {len(groups)} model groups")
     return list(groups.values()), warnings
 
 
