@@ -69,9 +69,10 @@ Each group gets a suggested tier and a one-line reason. Rules, first match wins:
 | 5 | ≥ 2 direct child groups that each have ≥ 2 leaves, or leaves cover ≥ 80% of the display | `wash` |
 | 6 | Fewer than 2 leaves | `skip` (single prop; still usable by name) |
 | 7 | Leaf set is a strict subset of another *candidate* group's leaf set | `skip` (a sub-part of a feature; still usable by name) |
-| 8 | Otherwise | `feature` |
+| 8 | Leaf set equals another candidate's, and that candidate's name sorts first | `skip` ("same props as X"; e.g. direction variants of one prop set) |
+| 9 | Otherwise | `feature` |
 
-*Candidate* groups are those not already assigned by rules 1–5 and with ≥ 2 leaves. Structure, not size, decides wash: on the Halloween show `Pipes` covers 57% of props by count but has no child groups, while `House` covers 25% with 7 child groups. Model `DisplayAs` can't separate them (114 of the file's 128 models are "Single Line").
+*Candidate* groups are those with ≥ 2 leaves that are either not assigned by rules 1–5 or overridden to `feature` (so pinning a group to `feature` never re-tiers its sub-parts). Structure, not size, decides wash: on the Halloween show `Pipes` covers 57% of props by count but has no child groups, while `House` covers 25% with 7 child groups. Model `DisplayAs` can't separate them (114 of the file's 128 models are "Single Line").
 
 **Accent props** are the non-placeholder leaf models of feature groups with ≤ 8 leaves. They're reported per feature group rather than as a separate group tier. On Halloween that's 9 groups / 43 props — lanterns and spots, but also individual roof tiers, door and window lines, which matches the human sequences (Remains of the Day lights individual lanterns and roof tiers for accents).
 
@@ -90,7 +91,7 @@ Optional `xlights-mcp.json` in the show folder:
 {"tiers": {"Peace-Odd": "feature", "Tree Spots": "skip"}}
 ```
 
-Unknown group names in the file produce a warning in `get_show_layout`, not an error. Invalid tier values are ignored with a warning.
+Unknown group names in the file produce a warning in `get_show_layout`, not an error. Tier values are case-insensitive; invalid ones are ignored with a warning. The file may carry a UTF-8 BOM (PowerShell writes one). A group overridden to `feature` with no props gets a warning.
 
 ### `get_show_layout(show_name: str | None = None)`
 
@@ -110,7 +111,7 @@ Returns, for the active (or named) show:
 }
 ```
 
-`y_range` comes from member models' `WorldPosY` (height). Groups are listed wash → feature → skip, then by name.
+`y_range` comes from member models' `WorldPosY` (height), rounded to 1 decimal; models without a finite `WorldPosY` are left out. Groups are listed wash → feature → skip, then by name.
 
 ## Plan writer: `write_sequence`
 
