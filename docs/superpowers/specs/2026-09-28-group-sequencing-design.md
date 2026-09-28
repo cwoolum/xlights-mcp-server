@@ -44,6 +44,7 @@ class ModelGroup(BaseModel):
     parent_groups: list[str] = []    # groups that list this group as a direct member
     leaf_models: list[str] = []      # all non-placeholder models reached through nesting (submodels map to their parent model)
     has_submodels: bool = False      # any direct member is a submodel
+    submodel_count: int = 0          # direct members that are submodels (tier rule 4 uses the majority)
     grid_size: str = ""
     layout: str = ""
 ```
