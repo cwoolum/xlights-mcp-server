@@ -25,6 +25,7 @@ from pathlib import Path
 from xlights_mcp.audio.analyzer import ProgressCallback, SongAnalysis, StemAnalysis, full_analysis
 from xlights_mcp.audio.structure import SongSection
 from xlights_mcp.config import AudioConfig
+from xlights_mcp.xlights.layout import classify_groups, load_tier_overrides
 from xlights_mcp.xlights.models import LightModel, ShowConfig
 from xlights_mcp.xlights.palettes import ColorPalette, get_theme_palettes
 from xlights_mcp.xlights.show import load_show_config
@@ -329,6 +330,11 @@ _LEGACY_GROUP_PATTERNS: list[tuple[str, list[str], str | None]] = [
 ]
 
 
+def _sequenceable_models(show_config: ShowConfig) -> list[LightModel]:
+    """Models that carry lights; placeholder models (Dont Map, Do Not Map) are left out."""
+    return [m for m in show_config.models if not m.is_placeholder]
+
+
 def _detect_model_groups(
     models: list[LightModel],
     show_config: ShowConfig,
@@ -337,10 +343,11 @@ def _detect_model_groups(
     list[LightModel],              # ungrouped models
     dict[str, str],                # group_name → model_category
 ]:
-    """Auto-detect model groups, preferring xLights-defined groups.
+    """Auto-detect model groups from the show's feature-tier xLights groups.
 
-    Checks show_config.model_groups first (parsed from xlights_rgbeffects.xml).
-    Falls back to common-prefix detection if no xLights groups exist.
+    Groups are tiered by classify_groups, honoring the show's xlights-mcp.json
+    overrides; only feature-tier groups with at least two models are used.
+    Falls back to common-prefix grouping when no feature-tier group qualifies.
 
     Returns grouped models (effects applied identically to all members),
     ungrouped models (effects applied individually), and category overrides.
@@ -349,9 +356,8 @@ def _detect_model_groups(
 
     # --- Strategy 1: xLights-defined feature-tier groups ---
     if show_config.model_groups:
-        from xlights_mcp.xlights.layout import classify_groups
-
-        tiers = classify_groups(show_config)
+        overrides, _ = load_tier_overrides(Path(show_config.show_path))
+        tiers = classify_groups(show_config, overrides)
         groups: dict[str, list[LightModel]] = {}
         group_categories: dict[str, str] = {}
         grouped_names: set[str] = set()
@@ -510,7 +516,8 @@ def _generate_auto(
     section_downbeats = _precompute_section_downbeats(analysis)
 
     # Detect model groups (uses xLights-defined groups, falls back to prefix detection)
-    groups, ungrouped, group_categories = _detect_model_groups(show_config.models, show_config)
+    models = _sequenceable_models(show_config)
+    groups, ungrouped, group_categories = _detect_model_groups(models, show_config)
     logger.info(f"Detected {len(groups)} model groups, {len(ungrouped)} ungrouped models")
     for gname, members in groups.items():
         logger.info(f"  Group '{gname}': {[m.name for m in members]}")
@@ -518,7 +525,7 @@ def _generate_auto(
     # Identify singing models (models with face definitions) — exclude from regular pipeline
     singing_models: dict[str, str] = {}  # model_name → face_definition_name
     singing_model_names: set[str] = set()
-    for m in show_config.models:
+    for m in models:
         if m.face_definitions:
             singing_models[m.name] = m.face_definitions[0]
             singing_model_names.add(m.name)
@@ -889,7 +896,7 @@ def _generate_auto(
         "duration": f"{analysis.duration_seconds:.1f}s",
         "tempo": f"{analysis.beats.tempo:.0f} BPM",
         "sections": len(analysis.sections),
-        "models_with_effects": len(show_config.models),
+        "models_with_effects": len(models),
         "total_effects": len(all_effects),
         "layers_used": len(layers_used),
         "unique_palettes": len(all_palettes),
