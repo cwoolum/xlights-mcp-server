@@ -65,14 +65,14 @@ Each group gets a suggested tier and a one-line reason. Rules, first match wins:
 | 1 | Override file names the group | that tier |
 | 2 | No non-placeholder leaf models (empty) | `skip` |
 | 3 | Name contains "preview" (case-insensitive) | `skip` |
-| 4 | `has_submodels` (row/segment groups like `Peace-P1`) | `skip` |
+| 4 | More than half of the direct members are submodels (row/segment groups like `Peace-P1`) | `skip` |
 | 5 | ≥ 2 direct child groups that each have ≥ 2 leaves, or leaves cover ≥ 80% of the display | `wash` |
 | 6 | Fewer than 2 leaves | `skip` (single prop; still usable by name) |
 | 7 | Leaf set is a strict subset of another *candidate* group's leaf set | `skip` (a sub-part of a feature; still usable by name) |
 | 8 | Leaf set equals another candidate's, and that candidate's name sorts first | `skip` ("same props as X"; e.g. direction variants of one prop set) |
 | 9 | Otherwise | `feature` |
 
-*Candidate* groups are those with ≥ 2 leaves that are either not assigned by rules 1–5 or overridden to `feature` (so pinning a group to `feature` never re-tiers its sub-parts). Structure, not size, decides wash: on the Halloween show `Pipes` covers 57% of props by count but has no child groups, while `House` covers 25% with 7 child groups. Model `DisplayAs` can't separate them (114 of the file's 128 models are "Single Line").
+*Candidate* groups are those with ≥ 2 leaves that are either not assigned by rules 1–5 or overridden to `feature` (so pinning an already-candidate group to `feature` doesn't re-tier its sub-parts). Other overrides can change which groups count as sub-parts — e.g. overriding `House` to `feature` makes Roof Edges "part of House"; the tool docstring says so. Structure, not size, decides wash: on the Halloween show `Pipes` covers 57% of props by count but has no child groups, while `House` covers 25% with 7 child groups. Model `DisplayAs` can't separate them (114 of the file's 128 models are "Single Line").
 
 **Accent props** are the non-placeholder leaf models of feature groups with ≤ 8 leaves. They're reported per feature group rather than as a separate group tier. On Halloween that's 9 groups / 43 props — lanterns and spots, but also individual roof tiers, door and window lines, which matches the human sequences (Remains of the Day lights individual lanterns and roof tiers for accents).
 
@@ -103,7 +103,7 @@ Returns, for the active (or named) show:
   "model_count": 122, "placeholder_count": 6,
   "groups": [
     {"name": "Roof Edges", "tier": "feature", "reason": "top-level, 9 props",
-     "child_groups": ["Under Roof"], "parent_groups": ["House", "All"],
+     "child_groups": ["Under Roof"], "parent_groups": ["House"],
      "prop_count": 9, "y_range": [102, 179], "accent_props": []}
   ],
   "ungrouped_models": ["Tree 6ft"],
