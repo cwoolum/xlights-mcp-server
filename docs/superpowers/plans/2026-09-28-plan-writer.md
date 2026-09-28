@@ -51,7 +51,7 @@
 - **Timing tracks:** each is an `Element type="timing"` whose layer holds `<Effect label=… startTime=… endTime=…>` marks. Hand-made shows label beats `1,2,3,4` and bars `1,2,3…`.
 - **Test show:** the fixture `tests/fixtures/show_groups/xlights_rgbeffects.xml` contains:
   - models: Roof Left/Right, Under Left/Right, Door L/R, Pipe 1–14, Lantern1–3, Arch 1–2 and Tree 6ft, plus 2 placeholders;
-  - groups: All ⊃ House ⊃ {Roof Edges ⊃ Under Roof, Door}; Pipes; Pipes-Odd; Pipe Rows (submodels `Pipe 1/Top`); Lanterns; Everything Flat (all 25 real leaves plus a placeholder); Empty; PreviewONLY All; Single; Cycle A ↔ Cycle B (a cycle, B also holds Door L); Legacy Arches.
+  - groups: All ⊃ House ⊃ {Roof Edges ⊃ Under Roof, Door}; Pipes; Pipes-Odd; Pipe Rows (submodels `Pipe 1/Top`); Lanterns; Everything Flat (every real model except Tree 6ft, plus a placeholder); Empty; PreviewONLY All; Single; Cycle A ↔ Cycle B (a cycle, B also holds Door L); Legacy Arches.
 
 ---
 
@@ -192,7 +192,7 @@ def test_auto_mode_writes_effects_with_refs_and_palettes(tmp_path: Path, click_t
 ```
 
 Run: `.venv/Scripts/python -m pytest tests/test_engine_write.py -q`
-Expected: it **fails** on today's code with an `AssertionError` on the ref/palette check, because `write_xsq` drops any placement palette that isn't pre-registered. If it passes instead, carry on: the test still guards the refactor.
+Expected: PASS. This is a characterization test: today every engine palette is pre-registered, so each effect already gets `ref` and `palette`. It guards the refactor below.
 
 - [ ] **Step 2: Write the failing writer tests**
 
@@ -271,7 +271,7 @@ def test_settings_keep_their_order_and_every_effect_refs_them(tmp_path):
 ```
 
 Run: `.venv/Scripts/python -m pytest tests/test_xsq_writer.py -q`
-Expected: failures in the layer-position, palette and settings-order tests.
+Expected: the layer-position, palette-collection, default-palette and settings-order tests all fail.
 
 - [ ] **Step 3: Implement in `xsq_writer.py`**
 
@@ -624,7 +624,7 @@ def beat_labels(beat_times: Sequence[float], downbeat_times: Sequence[float]) ->
 
 def _marks(times_s: Sequence[float], labels: Sequence[str], end_ms: int) -> list[TimingTrackLabel]:
     """Frame-rounded marks, each ending where the next starts; the last ends at end_ms."""
-    points = sorted((to_frame(t * 1000), label) for t, label in zip(times_s, labels))
+    points = sorted(((to_frame(t * 1000), label) for t, label in zip(times_s, labels)), key=lambda p: p[0])
     marks = []
     for k, (start, label) in enumerate(points):
         end = min(points[k + 1][0] if k + 1 < len(points) else end_ms, end_ms)
@@ -1296,7 +1296,9 @@ def test_an_existing_file_needs_overwrite(show):
 
 def test_name_sets_the_file_name_and_rejects_paths(show):
     assert _write(show, name="My Show")["path"] == str(show / "My Show.xsq")
-    assert "name" in _write(show, name="../escape")["errors"][0]
+    assert _write(show, name="Other.xsq", validate_only=True)["path"] == str(show / "Other.xsq")
+    for bad in ("../escape", "..", " "):
+        assert "name" in _write(show, name=bad)["errors"][0]
 
 
 def test_duplicate_timing_track_names_are_an_error(show):
@@ -1382,9 +1384,10 @@ def write_plan(
         for track, n in Counter(t.name for t in tracks).items() if n > 1
     ]
 
-    file_name = f"{name or mp3_path.stem}.xsq"
+    stem = name.removesuffix(".xsq") if name is not None else mp3_path.stem
+    file_name = f"{stem}.xsq"
     output = show_path / file_name
-    if name is not None and (not name.strip() or Path(file_name).name != file_name):
+    if name is not None and (not stem.strip(" .") or Path(file_name).name != file_name):
         errors.append(f"name must be a plain file name without folders, got {name!r}")
     elif output.exists() and not overwrite:
         errors.append(f"{file_name} already exists; pass overwrite=true to replace it")
@@ -1662,7 +1665,7 @@ git commit -m "write_sequence MCP tool"
 - [ ] **Step 1: Full suite**
 
 Run: `.venv/Scripts/python -m pytest -q`
-Expected: every test passes (about 319 + ~70 new), 1 deselected.
+Expected: every test passes (about 319 + 82 new), 1 deselected.
 
 - [ ] **Step 2: Real-show smoke test (Halloween, into a scratch copy of the show)**
 
@@ -1670,6 +1673,7 @@ Write the script below to the session scratchpad, then run it with `.venv/Script
 
 ```python
 import shutil, tempfile
+SCRATCHPAD = "C:/Users/slick/AppData/Local/Temp/claude/E--/8c935770-b48a-44ae-b6a1-39ac9cf09310/scratchpad"
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from xlights_mcp.audio.analyzer import full_analysis
@@ -1677,7 +1681,7 @@ from xlights_mcp.config import load_config
 from xlights_mcp.sequencer.plan_writer import write_plan
 
 song = Path(r"E:\XLights\HalloweenShow\Music\GhostsnStuffft.RobSwire.mp3")
-show = Path(tempfile.mkdtemp()) / "HalloweenShow"
+show = Path(tempfile.mkdtemp(dir=SCRATCHPAD)) / "HalloweenShow"
 show.mkdir()
 shutil.copy(r"E:\XLights\HalloweenShow\xlights_rgbeffects.xml", show)
 for xsq in Path(r"E:\XLights\HalloweenShow").glob("*.xsq"):
@@ -1689,7 +1693,7 @@ plan = [
     {"element": "Spooky Fence", "layer": 0, "effect": "SingleStrand", "start_ms": 16000, "end_ms": 32000,
      "settings": {"E_CHOICE_Chase_Type1": "Left-Right", "E_NOTEBOOK_SSEFFECT_TYPE": "Chase"}},
     {"element": "Lanterns", "layer": 1, "effect": "On", "start_ms": 16000, "end_ms": 16100},
-    {"element": "Roof Edges", "layer": 2, "effect": "Shockwave", "start_ms": 20000, "end_ms": 21000},
+    {"element": "Roof Edges", "layer": 2, "effect": "Shockwave", "start_ms": 12000, "end_ms": 13000},
 ]
 report = write_plan(plan, analysis, song, show, name="MCP writer smoke",
                     timing_tracks=["Beats", "Bars", "Drums", "Bass", "Instruments"])
