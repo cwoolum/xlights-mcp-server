@@ -100,6 +100,11 @@ class ShowConfig(BaseModel):
     total_channels: int = 0
     warnings: list[str] = Field(default_factory=list)
 
+    @property
+    def real_models(self) -> list[LightModel]:
+        """Models that carry lights; layout-only placeholders are left out."""
+        return [m for m in self.models if not m.is_placeholder]
+
     def get_models_by_controller(self, controller_name: str) -> list[LightModel]:
         """Get all models assigned to a specific controller."""
         return [m for m in self.models if m.controller == controller_name]

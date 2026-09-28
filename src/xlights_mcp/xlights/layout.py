@@ -31,7 +31,7 @@ def classify_groups(
     """Tier and one-line reason for every group, first matching rule wins."""
     overrides = overrides or {}
     by_name = {g.name: g for g in show.model_groups}
-    display_size = sum(1 for m in show.models if not m.is_placeholder)
+    display_size = len(show.real_models)
     result: dict[str, tuple[Tier, str]] = {}
 
     for g in show.model_groups:
@@ -162,7 +162,7 @@ def build_show_layout(show: ShowConfig, show_path: Path) -> dict[str, Any]:
         )
     rows.sort(key=lambda r: (TIERS.index(r.tier), r.name.lower()))
 
-    real = [m.name for m in show.models if not m.is_placeholder]
+    real = [m.name for m in show.real_models]
     grouped = {leaf for g in show.model_groups for leaf in g.leaf_models}
     return {
         "show": show.show_name,

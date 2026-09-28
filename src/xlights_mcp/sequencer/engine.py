@@ -330,11 +330,6 @@ _LEGACY_GROUP_PATTERNS: list[tuple[str, list[str], str | None]] = [
 ]
 
 
-def _sequenceable_models(show_config: ShowConfig) -> list[LightModel]:
-    """Models that carry lights; placeholder models (Dont Map, Do Not Map) are left out."""
-    return [m for m in show_config.models if not m.is_placeholder]
-
-
 def _detect_model_groups(
     models: list[LightModel],
     show_config: ShowConfig,
@@ -473,7 +468,7 @@ def preview_sequence_plan(
         "tempo": f"{analysis.beats.tempo:.0f} BPM",
         "beat_count": len(analysis.beats.beat_times),
         "sections": sections_summary,
-        "models": len(_sequenceable_models(show_config)),
+        "models": len(show_config.real_models),
         "controllers": len(show_config.controllers),
     }
 
@@ -516,7 +511,7 @@ def _generate_auto(
     section_downbeats = _precompute_section_downbeats(analysis)
 
     # Detect model groups (uses xLights-defined groups, falls back to prefix detection)
-    models = _sequenceable_models(show_config)
+    models = show_config.real_models
     groups, ungrouped, group_categories = _detect_model_groups(models, show_config)
     logger.info(f"Detected {len(groups)} model groups, {len(ungrouped)} ungrouped models")
     for gname, members in groups.items():
@@ -927,7 +922,7 @@ def _generate_guided_preview(analysis: SongAnalysis, show_config: ShowConfig) ->
         })
 
     models_by_category = {}
-    for m in _sequenceable_models(show_config):
+    for m in show_config.real_models:
         cat = m.model_category
         models_by_category.setdefault(cat, []).append(m.name)
 
