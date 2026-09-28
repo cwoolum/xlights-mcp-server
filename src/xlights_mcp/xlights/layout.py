@@ -10,6 +10,7 @@ docs/superpowers/specs/2026-09-28-group-sequencing-design.md, "Tiers".
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any, Literal
 
@@ -35,7 +36,7 @@ def classify_groups(
 
     for g in show.model_groups:
         leaves = len(g.leaf_models)
-        big_children = [c for c in g.child_groups if len(by_name[c].leaf_models) >= 2]
+        big_children = [c for c in g.child_groups if (child := by_name.get(c)) and len(child.leaf_models) >= 2]
         share = leaves / display_size if display_size else 0.0
         if g.name in overrides:
             result[g.name] = (overrides[g.name], "override")
@@ -48,7 +49,11 @@ def classify_groups(
         elif len(big_children) >= WASH_MIN_CHILD_GROUPS or share >= WASH_MIN_DISPLAY_SHARE:
             result[g.name] = ("wash", f"{len(big_children)} child groups, {share:.0%} of display")
 
-    candidates = [g for g in show.model_groups if g.name not in result and len(g.leaf_models) >= 2]
+    candidates = [
+        g
+        for g in show.model_groups
+        if len(g.leaf_models) >= 2 and (g.name not in result or overrides.get(g.name) == "feature")
+    ]
     for g in show.model_groups:
         if g.name in result:
             continue
@@ -56,17 +61,34 @@ def classify_groups(
             result[g.name] = ("skip", "single prop")
             continue
         parent = _smallest_superset(g, candidates)
+        twin = _first_named_twin(g, candidates)
         if parent is not None:
             result[g.name] = ("skip", f"part of {parent.name}")
+        elif twin is not None:
+            result[g.name] = ("skip", f"same props as {twin.name}")
         else:
             result[g.name] = ("feature", f"top-level, {len(g.leaf_models)} props")
     return result
 
 
+def _name_order(group: ModelGroup) -> tuple[str, str]:
+    return (group.name.lower(), group.name)
+
+
 def _smallest_superset(group: ModelGroup, candidates: list[ModelGroup]) -> ModelGroup | None:
     leaves = set(group.leaf_models)
     supersets = [c for c in candidates if c.name != group.name and leaves < set(c.leaf_models)]
-    return min(supersets, key=lambda c: (len(c.leaf_models), c.name), default=None)
+    return min(supersets, key=lambda c: (len(c.leaf_models), *_name_order(c)), default=None)
+
+
+def _first_named_twin(group: ModelGroup, candidates: list[ModelGroup]) -> ModelGroup | None:
+    leaves = set(group.leaf_models)
+    twins = [
+        c
+        for c in candidates
+        if c.name != group.name and leaves == set(c.leaf_models) and _name_order(c) < _name_order(group)
+    ]
+    return min(twins, key=_name_order, default=None)
 
 
 OVERRIDE_FILE = "xlights-mcp.json"
@@ -90,7 +112,7 @@ def load_tier_overrides(show_path: Path) -> tuple[dict[str, Tier], list[str]]:
     if not path.exists():
         return {}, []
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as e:
         return {}, [f"Ignoring {OVERRIDE_FILE}: {e}"]
     tiers = data.get("tiers", {}) if isinstance(data, dict) else None
@@ -100,8 +122,9 @@ def load_tier_overrides(show_path: Path) -> tuple[dict[str, Tier], list[str]]:
     overrides: dict[str, Tier] = {}
     warnings: list[str] = []
     for name, tier in tiers.items():
-        if tier in TIERS:
-            overrides[name] = tier
+        normalized = tier.strip().lower() if isinstance(tier, str) else None
+        if normalized in TIERS:
+            overrides[name] = normalized
         else:
             warnings.append(f"{OVERRIDE_FILE}: group '{name}' has unknown tier '{tier}' (use {', '.join(TIERS)})")
     return overrides, warnings
@@ -116,12 +139,15 @@ def build_show_layout(show: ShowConfig, show_path: Path) -> dict[str, Any]:
             warnings.append(f"{OVERRIDE_FILE}: no group named '{name}'")
     overrides = {n: t for n, t in overrides.items() if n in names}
     tiers = classify_groups(show, overrides)
+    for g in show.model_groups:
+        if overrides.get(g.name) == "feature" and not g.leaf_models:
+            warnings.append(f"{g.name} is overridden to feature but has no props")
 
     height = {m.name: m.world_pos_y for m in show.models}
     rows = []
     for g in show.model_groups:
         tier, reason = tiers[g.name]
-        ys = [height[m] for m in g.leaf_models if height.get(m) is not None]
+        ys = [y for m in g.leaf_models if (y := height.get(m)) is not None and math.isfinite(y)]
         rows.append(
             GroupLayout(
                 name=g.name,
@@ -130,7 +156,7 @@ def build_show_layout(show: ShowConfig, show_path: Path) -> dict[str, Any]:
                 child_groups=g.child_groups,
                 parent_groups=g.parent_groups,
                 prop_count=len(g.leaf_models),
-                y_range=(min(ys), max(ys)) if ys else None,
+                y_range=(round(min(ys), 1), round(max(ys), 1)) if ys else None,
                 accent_props=g.leaf_models if tier == "feature" and len(g.leaf_models) <= ACCENT_MAX_PROPS else [],
             )
         )
