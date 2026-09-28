@@ -246,7 +246,7 @@ def _leaf_resolver(
 
 def _float_or_none(value: str | None) -> float | None:
     try:
-        result = float(value) if value is not None else None
-    except ValueError:
+        number = float(value)
+    except (TypeError, ValueError):
         return None
-    return result if result is None or math.isfinite(result) else None
+    return number if math.isfinite(number) else None
