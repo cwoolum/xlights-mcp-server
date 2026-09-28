@@ -5,11 +5,24 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
-from xlights_mcp.sequencer.engine import _detect_model_groups, _sequenceable_models
+from xlights_mcp.sequencer.engine import (
+    _detect_model_groups,
+    _generate_guided_preview,
+    _sequenceable_models,
+)
 from xlights_mcp.xlights.show import load_show_config
 
 SHOW = Path(__file__).parent / "fixtures" / "show_groups"
+
+
+def _analysis():
+    return SimpleNamespace(
+        sections=[],
+        duration_seconds=10.0,
+        beats=SimpleNamespace(tempo=120.0, beat_times=[]),
+    )
 
 
 def test_engine_groups_are_the_feature_tier_groups():
@@ -30,6 +43,17 @@ def test_placeholders_are_not_sequenced():
     assert "Spare - Dont Map" not in names
     assert "Roof Mid - Null - Do Not Map" not in names
     assert "Tree 6ft" in names
+
+
+def test_guided_preview_omits_placeholders():
+    show = load_show_config(SHOW)
+
+    preview = _generate_guided_preview(_analysis(), show)
+
+    listed = {name for names in preview["models_by_category"].values() for name in names}
+    assert "Tree 6ft" in listed
+    assert "Spare - Dont Map" not in listed
+    assert "Roof Mid - Null - Do Not Map" not in listed
 
 
 def test_engine_groups_honor_tier_overrides(tmp_path):

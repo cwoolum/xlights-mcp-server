@@ -24,7 +24,7 @@ from xlights_mcp.remapper.models import (
     ImportedModelMeta,
     _tokenize_name,
 )
-from xlights_mcp.xlights.models import LightModel, ModelGroup
+from xlights_mcp.xlights.models import LightModel, ModelGroup, is_placeholder_name
 
 logger = logging.getLogger(__name__)
 
@@ -705,11 +705,16 @@ def match_models(
         2. Run priority 1–5 on singing pool, then non-singing pool
         3. Assemble MappingReport with statistics and reasons
     """
+    # Placeholder elements carry no lights; they are reported, never matched.
+    imported_placeholders = [c for c in imported_candidates if is_placeholder_name(c.name)]
+
     # Build pools keyed by name for O(1) removal
-    imported_pool: dict[str, MatchCandidate] = {c.name: c for c in imported_candidates}
+    imported_pool: dict[str, MatchCandidate] = {
+        c.name: c for c in imported_candidates if not is_placeholder_name(c.name)
+    }
     user_pool: dict[str, MatchCandidate] = {c.name: c for c in user_candidates}
 
-    total_imported = len(imported_pool)
+    total_imported = len(imported_pool) + len(imported_placeholders)
     total_user = len(user_pool)
 
     all_mappings: list[ModelMapping] = []
@@ -761,6 +766,18 @@ def match_models(
 
     unmatched_imported, unmatched_user = _generate_unmatched_reasons(
         remaining_imported, remaining_user, threshold
+    )
+    unmatched_imported.extend(
+        UnmatchedModel(
+            name=c.name,
+            source="imported",
+            reason="placeholder (no lights)",
+            pixel_count=c.pixel_count,
+            display_as=c.display_as,
+            is_singing=c.is_singing,
+            is_group=c.is_group,
+        )
+        for c in imported_placeholders
     )
 
     # --- Statistics ---

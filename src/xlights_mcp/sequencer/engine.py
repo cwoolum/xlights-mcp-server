@@ -473,7 +473,7 @@ def preview_sequence_plan(
         "tempo": f"{analysis.beats.tempo:.0f} BPM",
         "beat_count": len(analysis.beats.beat_times),
         "sections": sections_summary,
-        "models": len(show_config.models),
+        "models": len(_sequenceable_models(show_config)),
         "controllers": len(show_config.controllers),
     }
 
@@ -927,7 +927,7 @@ def _generate_guided_preview(analysis: SongAnalysis, show_config: ShowConfig) ->
         })
 
     models_by_category = {}
-    for m in show_config.models:
+    for m in _sequenceable_models(show_config):
         cat = m.model_category
         models_by_category.setdefault(cat, []).append(m.name)
 

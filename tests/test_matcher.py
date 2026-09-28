@@ -357,6 +357,31 @@ class TestApplyOverrides:
 
 
 class TestMatchModels:
+    def test_imported_placeholder_is_never_matched(self):
+        imp = [_make_candidate("Tier Mid - Dont Map", "imported", pixel_count=50)]
+        usr = [_make_candidate("Tier Mid Row 1", "user", pixel_count=50)]
+
+        report = match_models(imp, usr)
+
+        assert report.mappings == []
+        assert report.total_imported_models == 1
+        assert [(u.name, u.reason) for u in report.unmatched_imported] == [
+            ("Tier Mid - Dont Map", "placeholder (no lights)")
+        ]
+        assert [u.name for u in report.unmatched_user] == ["Tier Mid Row 1"]
+
+    def test_real_imported_models_still_match_beside_placeholders(self):
+        imp = [
+            _make_candidate("Mega Tree", "imported"),
+            _make_candidate("Spare - Do Not Map", "imported"),
+        ]
+        usr = [_make_candidate("Mega Tree", "user")]
+
+        report = match_models(imp, usr)
+
+        assert [m.imported_name for m in report.mappings] == ["Mega Tree"]
+        assert [u.name for u in report.unmatched_imported] == ["Spare - Do Not Map"]
+
     def test_basic_exact_match(self):
         imp = [_make_candidate("Mega Tree", "imported")]
         usr = [_make_candidate("Mega Tree", "user")]
