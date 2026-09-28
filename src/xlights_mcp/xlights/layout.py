@@ -176,7 +176,6 @@ def build_show_layout(show: ShowConfig) -> dict[str, Any]:
     real = [m.name for m in show.real_models]
     grouped = {leaf for g in show.model_groups for leaf in g.leaf_models}
     return {
-        "show": show.show_name,
         "model_count": len(real),
         "placeholder_count": len(show.models) - len(real),
         "groups": [r.model_dump(mode="json") for r in rows],
