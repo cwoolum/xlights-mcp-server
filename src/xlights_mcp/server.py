@@ -214,11 +214,12 @@ def get_show_layout(show_name: str | None = None) -> dict:
 
     Tiers: "wash" = broad parent groups for a base layer (e.g. All, House);
     "feature" = top-level props that carry motion (e.g. Roof Edges, Pipes);
-    "skip" = empty, preview-only, submodel-row, single-prop groups, or sub-parts
-    of a feature. Every group is still usable by name. Each group lists its child
-    and parent groups, prop count, height range (y_range) and, for small feature
-    groups, accent_props (single props for accents). Tiers can be overridden in
-    xlights-mcp.json in the show folder: {"tiers": {"Group Name": "feature"}}.
+    "skip" = empty, preview-only, submodel-row, single-prop or identical-to-another-group
+    groups, or sub-parts of a feature. Every group is still usable by name. Each group
+    lists its child and parent groups, prop count, height range (y_range) and, for small
+    feature groups, accent_props (single props for accents). Tiers can be overridden in
+    xlights-mcp.json in the show folder: {"tiers": {"Group Name": "feature"}}. Overriding
+    a group can change which other groups count as its sub-parts, so check the result.
 
     Args:
         show_name: Show to describe (defaults to the active show)
