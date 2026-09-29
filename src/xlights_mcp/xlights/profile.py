@@ -20,33 +20,60 @@ TOP_EFFECTS = 3
 Span = tuple[int, int]
 
 
+Effect = tuple[str, int, int]
+
+
 @dataclass
 class _Element:
     name: str
-    layers: list[list[tuple[str, int, int]]]
+    layers: list[list[Effect]]
+    sub_effects: list[Effect]
+
+    def merge(self, other: _Element) -> None:
+        for i, layer in enumerate(other.layers):
+            if i < len(self.layers):
+                self.layers[i].extend(layer)
+            else:
+                self.layers.append(layer)
+        self.sub_effects.extend(other.sub_effects)
+
+    @property
+    def effects(self) -> list[Effect]:
+        return [effect for layer in self.layers for effect in layer] + self.sub_effects
+
+
+def _effect(node: ET.Element) -> Effect:
+    return node.get("name", ""), int(node.get("startTime", "0")), int(node.get("endTime", "0"))
 
 
 def _read(xsq_path: Path) -> tuple[int, list[_Element], list[str]]:
     root = ET.parse(xsq_path).getroot()
-    elements: list[_Element] = []
+    by_name: dict[str, _Element] = {}
     timing: list[str] = []
     for el in root.iterfind("ElementEffects/Element"):
         name = el.get("name", "")
         if el.get("type") == "timing":
             timing.append(name)
             continue
-        layers = [
-            [(e.get("name", ""), int(e.get("startTime", "0")), int(e.get("endTime", "0"))) for e in layer.iterfind("Effect")]
-            for layer in el.iterfind("EffectLayer")
-        ]
-        if any(layers):
-            elements.append(_Element(name, layers))
+        layers: list[list[Effect]] = []
+        sub_effects: list[Effect] = []
+        for child in el:
+            if child.tag == "EffectLayer":
+                layers.append([_effect(e) for e in child.iterfind("Effect")])
+            else:
+                sub_effects.extend(_effect(e) for e in child.iter("Effect"))
+        element = _Element(name, layers, sub_effects)
+        if name in by_name:
+            by_name[name].merge(element)
+        else:
+            by_name[name] = element
+    elements = [e for e in by_name.values() if e.effects]
     try:
         duration_ms = round(float(root.findtext("head/sequenceDuration", "0")) * 1000)
     except ValueError:
         duration_ms = 0
     if duration_ms <= 0:
-        duration_ms = max((end for e in elements for layer in e.layers for _, _, end in layer), default=0)
+        duration_ms = max((end for e in elements for _, _, end in e.effects), default=0)
     return duration_ms, elements, timing
 
 
@@ -58,6 +85,11 @@ def _merge(spans: list[Span]) -> list[Span]:
         else:
             merged.append([start, end])
     return [(start, end) for start, end in merged]
+
+
+def _lit_spans(element: _Element, duration_ms: int) -> list[Span]:
+    clipped = ((max(start, 0), min(end, duration_ms)) for name, start, end in element.effects if name != "Off")
+    return [(start, end) for start, end in clipped if end > start]
 
 
 def _length(spans: list[Span]) -> int:
@@ -105,19 +137,17 @@ def profile_sequence(xsq_path: Path, show: ShowConfig) -> dict:
     duration_ms, elements, timing_tracks = _read(xsq_path)
     groups = {g.name for g in show.model_groups}
     models = {m.name for m in show.models}
-    lit = {
-        e.name: _merge([(s, t) for layer in e.layers for name, s, t in layer if name != "Off" and t > s])
-        for e in elements
-    }
+    lit = {e.name: _merge(_lit_spans(e, duration_ms)) for e in elements}
 
     rows = []
     for e in elements:
-        effects = [effect for layer in e.layers for effect in layer]
+        effects = e.effects
         rows.append({
             "element": e.name,
             "kind": "group" if e.name in groups else "model" if e.name in models else "unknown",
             "layers": [i for i, layer in enumerate(e.layers) if layer],
             "effects": len(effects),
+            "sub_effects": len(e.sub_effects),
             "median_ms": round(statistics.median(end - start for _, start, end in effects)),
             "lit_share": round(_length(lit[e.name]) / duration_ms, 2) if duration_ms else 0.0,
             "top_effects": [name for name, _ in Counter(name for name, _, _ in effects).most_common(TOP_EFFECTS)],
