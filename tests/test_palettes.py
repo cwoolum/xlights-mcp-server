@@ -106,6 +106,12 @@ def test_a_step_at_the_very_end_uses_the_last_two_slots():
     assert [(round(x * 200), level) for x, level in curve] == [(0, 100), (199, 100), (200, 300)]
 
 
+def test_an_end_step_that_displaces_slot_199_warns():
+    _, warnings = brightness_curve_points([(0, 100), (9950, 50), (10000, 100), (10000, 300)], 0, 10000)
+
+    assert "brightness points closer than one curve slot (50 ms) were merged" in warnings
+
+
 def test_slots_round_half_up():
     curve, warnings = brightness_curve_points([(0, 100), (25, 200), (75, 300), (10000, 300)], 0, 10000)
 

@@ -28,6 +28,7 @@ def brightness_curve_points(
             snapped = True
         if t == previous_t:
             if previous_slot >= CURVE_SLOTS:
+                merged = merged or CURVE_SLOTS - 1 in by_slot
                 by_slot[CURVE_SLOTS - 1] = by_slot.pop(CURVE_SLOTS)
                 previous_slot = CURVE_SLOTS - 1
             slot = previous_slot + 1
