@@ -39,6 +39,13 @@ def test_show_notes_are_embedded():
     assert "Never light the neighbours' side" in render_sequence_song("Song.mp3", None, "Never light the neighbours' side")
 
 
+def test_show_notes_are_quoted_so_their_headings_dont_clash_with_the_playbook():
+    text = render_sequence_song("Song.mp3", None, "## Rules\n\nNo strobes.\n\n\n# Tips\nKeep it warm.")
+
+    assert "> ## Rules\n>\n> No strobes.\n>\n>\n> # Tips\n> Keep it warm.\n" in text
+    assert "\n## Rules" not in text and "\n# Tips" not in text
+
+
 @pytest.fixture
 def active_show(show_copy: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(
@@ -76,3 +83,32 @@ async def test_show_claude_md_is_embedded(active_show):
     (active_show / ".claude" / "CLAUDE.md").write_text("Keep the tombstones white.", encoding="utf-8")
 
     assert "Keep the tombstones white." in await _get({"mp3_path": "Song.mp3"})
+
+
+async def test_an_empty_reference_falls_back_to_the_default(active_show):
+    shutil.copy(HUMAN_STYLE, active_show)
+
+    text = await _get({"mp3_path": "Song.mp3", "reference_sequence": ""})
+
+    assert "Human Style.xsq" in text
+
+
+async def test_without_an_active_show_it_renders_the_no_reference_text(monkeypatch):
+    monkeypatch.setattr(server_module, "_config", ServerConfig())
+
+    text = await _get({"mp3_path": "Song.mp3"})
+
+    assert "no hand-made sequence" in text.lower()
+
+
+@pytest.mark.parametrize("make_notes", [
+    lambda p: p.write_bytes(b"\xff\xfe\x00bad"),
+    lambda p: p.mkdir(),
+], ids=["invalid-bytes", "directory"])
+async def test_unreadable_show_notes_are_left_out(active_show, make_notes):
+    (active_show / ".claude").mkdir()
+    make_notes(active_show / ".claude" / "CLAUDE.md")
+
+    text = await _get({"mp3_path": "Song.mp3"})
+
+    assert "Show notes" not in text and "Sequence Song.mp3" in text

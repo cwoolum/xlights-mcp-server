@@ -24,11 +24,15 @@ _WITHOUT_REFERENCE = (
 )
 
 
+def _quote(text: str) -> str:
+    return "\n".join(f"> {line}" if line.strip() else ">" for line in text.strip().splitlines())
+
+
 def render_sequence_song(mp3_path: str, reference: str | None, show_notes: str | None) -> str:
     """The sequence_song playbook for a song, a reference sequence and the show's notes."""
     notes = (
-        f"\n### Show notes\n\nThe show folder's `.claude/CLAUDE.md` says the following; follow it:\n\n{show_notes.strip()}\n"
-        if show_notes else ""
+        f"\n### Show notes\n\nThe show folder's `.claude/CLAUDE.md` says the following; follow it:\n\n{_quote(show_notes)}\n"
+        if show_notes and show_notes.strip() else ""
     )
     return (
         _SEQUENCE_SONG.read_text(encoding="utf-8")

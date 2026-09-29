@@ -941,8 +941,11 @@ def sequence_song(mp3_path: str, reference_sequence: str | None = None) -> str:
             latest = latest_hand_made_sequence(show_path)
             reference = latest.name if latest else None
         notes_file = show_path / ".claude" / "CLAUDE.md"
-        if notes_file.exists():
-            notes = notes_file.read_text(encoding="utf-8-sig")
+        if notes_file.is_file():
+            try:
+                notes = notes_file.read_text(encoding="utf-8-sig")
+            except (OSError, UnicodeDecodeError):
+                notes = None
     return render_sequence_song(mp3_path, reference, notes)
 
 
