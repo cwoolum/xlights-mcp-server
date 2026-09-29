@@ -645,7 +645,7 @@ def _baseline_placements(analysis: SongAnalysis, cast: _Cast, colors: list[str])
                     at = to_frame(downbeat * 1000)
                     if at >= song_end:
                         continue
-                    plan.append(_placement(pool[accent_turn % len(pool)], 1, "On_solid", at, at + ACCENT_MS, palette))
+                    plan.append(_placement(pool[accent_turn % len(pool)], 0, "On_solid", at, at + ACCENT_MS, palette))
                     accent_turn += 1
     return plan
 
