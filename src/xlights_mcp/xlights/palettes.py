@@ -12,6 +12,7 @@ class ColorPalette(BaseModel):
     active_colors: list[int] = Field(default_factory=list)  # which palette slots are active
     sparkle_frequency: int = 0
     sparkle_color: str = ""
+    brightness: int = 100
 
     def to_xlights_string(self) -> str:
         """Serialize to the xLights palette format string."""
@@ -27,6 +28,9 @@ class ColorPalette(BaseModel):
         for idx in self.active_colors:
             parts.append(f"C_CHECKBOX_Palette{idx}=1")
 
+        if self.brightness != 100:
+            parts.append(f"C_SLIDER_Brightness={self.brightness}")
+
         # Sparkle
         if self.sparkle_frequency > 0:
             parts.append(f"C_SLIDER_SparkleFrequency={self.sparkle_frequency}")
@@ -34,6 +38,9 @@ class ColorPalette(BaseModel):
             parts.append(f"C_COLOURPICKERCTRL_SparklesColour={self.sparkle_color}")
 
         return ",".join(parts)
+
+
+DEFAULT_PALETTE = ColorPalette(colors=["#FFFFFF"], active_colors=[1])
 
 
 # Pre-defined theme palettes
