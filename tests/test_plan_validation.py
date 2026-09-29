@@ -61,7 +61,7 @@ def test_a_placement_starting_at_or_after_the_song_end_says_so(start):
     result = _validate(_p(start_ms=start, end_ms=22000))
 
     assert result.placements == []
-    assert "starts after the song ends (last frame 20000 ms)" in result.errors[0]
+    assert "starts at or after the song end (last frame 20000 ms)" in result.errors[0]
 
 
 def test_negative_or_non_numeric_times_are_errors():

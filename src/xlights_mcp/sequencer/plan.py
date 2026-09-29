@@ -134,7 +134,7 @@ def _times(start, end, song_end: int) -> tuple[int, int, bool, bool]:
         raise PlanError(f"start_ms must be >= 0, got {start}")
     frame_start, frame_end = to_frame(start), to_frame(end)
     if frame_start >= song_end:
-        raise PlanError(f"starts after the song ends (last frame {song_end} ms)")
+        raise PlanError(f"starts at or after the song end (last frame {song_end} ms)")
     rounded = (frame_start, frame_end) != (start, end)
     clipped = frame_end > song_end
     frame_end = min(frame_end, song_end)
