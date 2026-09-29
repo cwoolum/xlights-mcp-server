@@ -13,6 +13,7 @@ from xlights_mcp.sequencer.timing import build_timing_tracks
 from xlights_mcp.xlights.effects import known_effect_names
 from xlights_mcp.xlights.models import ShowConfig
 from xlights_mcp.xlights.show import load_show_config
+from xlights_mcp.xlights.version import installed_xlights_version
 from xlights_mcp.xlights.xsq_writer import SequenceSpec, TimingTrack, write_xsq
 
 MAX_REPORTED_ERRORS = 50
@@ -75,6 +76,7 @@ def write_plan(
         song_title=mp3_path.stem,
         media_file=str(mp3_path),
         duration_ms=analysis.duration_ms,
+        xlights_version=installed_xlights_version(show_path),
         effects=placements,
         timing_tracks=tracks,
     )
