@@ -61,20 +61,17 @@ def validate_plan(
     song_end = last_frame_ms(duration_ms)
     indexed: list[tuple[int, EffectPlacement]] = []
     for i, raw in enumerate(plan):
+        where = f"placement {i}{_describe(raw)}"
+        warnings: list[str] = []
         try:
-            placement, rounded, clipped, curve_warnings = _placement(raw, models, elements, effect_names, song_end)
+            placement, rounded, clipped = _placement(raw, models, elements, effect_names, song_end, warnings)
         except PlanError as e:
-            result.errors.append(f"placement {i}{_describe(raw)}: {e}")
+            result.errors.append(f"{where}: {e}")
             continue
         result.adjusted["rounded_to_frame"] += rounded
         result.adjusted["clipped_to_end"] += clipped
         indexed.append((i, placement))
-        result.warnings.extend(f"placement {i}{_describe(raw)}: {w}" for w in curve_warnings)
-        palette = placement.palette
-        if palette and palette.music_sparkles and palette.sparkle_frequency == 0:
-            result.warnings.append(
-                f"placement {i}{_describe(raw)}: music_sparkles has no effect while sparkles is 0"
-            )
+        result.warnings.extend(f"{where}: {w}" for w in warnings)
     result.errors.extend(_overlaps(indexed))
     result.placements = [p for _, p in indexed]
     result.warnings.extend(_parent_child_warnings(result.placements, show))
@@ -94,7 +91,8 @@ def _placement(
     elements: set[str],
     effect_names: AbstractSet[str],
     song_end: int,
-) -> tuple[EffectPlacement, bool, bool, list[str]]:
+    warnings: list[str],
+) -> tuple[EffectPlacement, bool, bool]:
     if not isinstance(raw, dict):
         raise PlanError("must be an object")
     _check_keys(raw, _PLACEMENT_KEYS)
@@ -103,9 +101,10 @@ def _placement(
     if not _is_int(layer) or not 0 <= layer <= MAX_LAYER:
         raise PlanError(f"layer must be an integer 0-{MAX_LAYER}, got {layer!r}")
     effect = _effect(raw.get("effect"), effect_names)
-    start, end, rounded, clipped = _times(raw.get("start_ms"), raw.get("end_ms"), song_end)
+    start, full_end, rounded = _times(raw.get("start_ms"), raw.get("end_ms"), song_end)
+    end = min(full_end, song_end)
     settings = _with_blend(_settings(raw.get("settings")), raw.get("blend"))
-    palette, curve_warnings = _palette(raw.get("palette"), start, end, to_frame(raw.get("end_ms")))
+    palette = _palette(raw.get("palette"), start, end, full_end, warnings)
     placement = EffectPlacement(
         model_name=element,
         layer=layer,
@@ -115,7 +114,7 @@ def _placement(
         settings=settings,
         palette=palette,
     )
-    return placement, rounded, clipped, curve_warnings
+    return placement, rounded, full_end > song_end
 
 
 def _check_keys(mapping: dict, allowed: tuple[str, ...]) -> None:
@@ -155,9 +154,9 @@ def _effect(name, effect_names: AbstractSet[str]) -> str:
     raise PlanError(f"unknown effect {name!r}{_suggest(name, effect_names)}")
 
 
-def _times(start, end, song_end: int) -> tuple[int, int, bool, bool]:
+def _times(start, end, song_end: int) -> tuple[int, int, bool]:
     for key, value in (("start_ms", start), ("end_ms", end)):
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        if not _is_number(value):
             raise PlanError(f"{key} must be a number of milliseconds, got {value!r}")
     if start < 0:
         raise PlanError(f"start_ms must be >= 0, got {start}")
@@ -165,11 +164,11 @@ def _times(start, end, song_end: int) -> tuple[int, int, bool, bool]:
     if frame_start >= song_end:
         raise PlanError(f"starts at or after the song end (last frame {song_end} ms)")
     rounded = (frame_start, frame_end) != (start, end)
-    clipped = frame_end > song_end
-    frame_end = min(frame_end, song_end)
-    if frame_end <= frame_start:
-        raise PlanError(f"ends at or before its start after rounding/clipping ({frame_start}-{frame_end} ms)")
-    return frame_start, frame_end, rounded, clipped
+    if min(frame_end, song_end) <= frame_start:
+        raise PlanError(
+            f"ends at or before its start after rounding/clipping ({frame_start}-{min(frame_end, song_end)} ms)"
+        )
+    return frame_start, frame_end, rounded
 
 
 def _settings(value) -> dict[str, str]:
@@ -233,9 +232,9 @@ def _with_blend(settings: dict[str, str], blend) -> dict[str, str]:
     return rest if canonical == "Normal" else {**rest, LAYER_METHOD_KEY: canonical}
 
 
-def _palette(value, start: int, end: int, full_end: int) -> tuple[ColorPalette | None, list[str]]:
+def _palette(value, start: int, end: int, full_end: int, warnings: list[str]) -> ColorPalette | None:
     if value is None:
-        return None, []
+        return None
     if not isinstance(value, dict):
         raise PlanError("palette must be an object")
     _check_keys(value, _PALETTE_KEYS)
@@ -246,23 +245,25 @@ def _palette(value, start: int, end: int, full_end: int) -> tuple[ColorPalette |
     if bad is not None:
         raise PlanError(f"palette colours must be #RRGGBB, got {bad!r}")
     brightness = value.get("brightness", 100)
-    curve, warnings = None, []
+    curve = None
     if isinstance(brightness, list):
-        curve, warnings = custom_curve_points(
+        curve, curve_warnings = custom_curve_points(
             _curve_points(brightness, start, full_end), start, full_end, clip_end_ms=end
         )
-        brightness = 100
-    else:
-        brightness = _palette_int(value, "brightness", 100, MAX_BRIGHTNESS)
-    palette = ColorPalette(
+        warnings.extend(curve_warnings)
+    brightness = 100 if curve else _palette_int(value, "brightness", 100, MAX_BRIGHTNESS)
+    sparkles = _palette_int(value, "sparkles", 0, 200)
+    music_sparkles = _music_sparkles(value.get("music_sparkles", False))
+    if music_sparkles and sparkles == 0:
+        warnings.append("music_sparkles has no effect while sparkles is 0")
+    return ColorPalette(
         colors=[c.upper() for c in colors],
         active_colors=list(range(1, len(colors) + 1)),
         brightness=brightness,
         brightness_curve=curve,
-        sparkle_frequency=_palette_int(value, "sparkles", 0, 200),
-        music_sparkles=_music_sparkles(value.get("music_sparkles", False)),
+        sparkle_frequency=sparkles,
+        music_sparkles=music_sparkles,
     )
-    return palette, warnings
 
 
 def _is_number(value) -> bool:
