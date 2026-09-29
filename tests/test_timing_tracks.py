@@ -6,7 +6,13 @@ from show_fixtures import make_analysis
 
 from xlights_mcp.audio.analyzer import SongAnalysis
 from xlights_mcp.audio.stems_model import StemAnalysis, StemOnsets
-from xlights_mcp.sequencer.timing import beat_labels, build_timing_tracks, to_frame
+from xlights_mcp.sequencer.timing import (
+    STEM_TRACK_NAMES,
+    TIMING_TRACK_NAMES,
+    beat_labels,
+    build_timing_tracks,
+    to_frame,
+)
 
 
 def test_to_frame_rounds_to_the_nearest_frame():
@@ -77,6 +83,53 @@ def test_stem_track_without_stems_is_skipped_with_a_warning():
 
     assert tracks == [] and errors == []
     assert "Drums" in warnings[0]
+
+
+def _kick_analysis(onset_bass: list[float] | None) -> SongAnalysis:
+    drums = StemOnsets(
+        name="drums",
+        onset_times=[0.51, 1.0, 1.2],
+        onset_bass=onset_bass if onset_bass is not None else [],
+    )
+    return make_analysis(
+        4.0,
+        [0.0, 0.5, 1.0, 1.5],
+        [0.0],
+        stem_analysis=StemAnalysis(available=True, stems={"drums": drums}),
+    )
+
+
+def test_kicks_is_a_named_track():
+    assert "Kicks" in TIMING_TRACK_NAMES
+    assert "Kicks" in STEM_TRACK_NAMES
+
+
+def test_kicks_track_marks_only_drum_hits_with_a_kick_low_end():
+    (track,), warnings, errors = build_timing_tracks(["Kicks"], _kick_analysis([1.0, 0.9, 0.1]))
+
+    assert track.name == "Kicks" and warnings == [] and errors == []
+    assert _spans(track) == [("x", 500, 1000), ("x", 1000, 4000)]
+
+
+def test_kicks_track_without_stems_is_skipped_with_a_warning():
+    tracks, warnings, errors = build_timing_tracks(["Kicks"], _analysis())
+
+    assert tracks == [] and errors == []
+    assert warnings == ["Kicks timing track skipped: stem analysis is unavailable for this song"]
+
+
+def test_kicks_track_without_any_kicks_is_skipped_with_a_warning():
+    tracks, warnings, _ = build_timing_tracks(["Kicks"], _kick_analysis([0.1, 0.2, 0.1]))
+
+    assert tracks == []
+    assert warnings == ["Kicks timing track skipped: no kick hits in the drum stem"]
+
+
+def test_kicks_track_with_misaligned_bass_levels_is_skipped_with_the_reason():
+    tracks, warnings, _ = build_timing_tracks(["Kicks"], _kick_analysis(None))
+
+    assert tracks == []
+    assert warnings[0].startswith("Kicks timing track skipped: kick levels don't line up")
 
 
 def test_vocals_is_not_a_named_track():

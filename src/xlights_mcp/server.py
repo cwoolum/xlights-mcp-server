@@ -444,7 +444,9 @@ async def analyze_song(mp3_path: str, ctx: Context, force: bool = False) -> dict
     The response also includes: stems is a per-stem summary
     {onsets, mean_energy, silences_ms} keyed by "drums"/"bass"/"vocals"/"other", or
     null when source separation is unavailable — in that case get_stem_events will
-    also return an error. sections[].drums is "present"/"absent"/"decaying", or null
+    also return an error. silences_ms uses the same hit-bounded spans as
+    get_stem_events(kind="silences") with default parameters. sections[].drums is
+    "present"/"absent"/"decaying" from the energy-based structure analysis, or null
     when that section's structure came from the mixdown only (no drum stem).
     beat_source ("madmom"/"librosa") and drum_aligned say whether the beat grid used
     the drum-aware pipeline; structure_source ("stems"/"mixdown") says the same for
@@ -557,6 +559,8 @@ async def get_stem_events(
     end_ms: int | None = None,
     max_events: int = 500,
     resolution: str = "beat",
+    min_ms: int = 1000,
+    merge_gap_ms: int = 0,
 ) -> dict:
     """Get per-stem events from source separation (drums, bass, vocals, other).
 
@@ -574,31 +578,50 @@ async def get_stem_events(
     includes 0. Returns {"resolution", "points": [{"t_ms", "energy"}, ...]}; energy
     is 0-1, rounded to 3 decimal places.
 
-    kind="silences": [start, end] ms spans where the stem is silent, clipped to the
-    window. Returns {"spans_ms": [[start, end], ...]} and is never truncated. For
-    drums, a silence marks a breakdown, riser, or other gap; the span's END is where
-    the drums come back in (e.g. a drop).
+    kind="kicks": kick-drum hit times in the window (drum hits with a kick's low
+    end; drums only). Returns {"count", "events_ms": [int, ...]} like onsets.
 
-    onsets and energy return at most max_events items; when the response has
+    kind="silences": [start, end] ms spans where the stem is silent, clipped to the
+    window. Returns {"spans_ms": [[start, end], ...]} and is never truncated. Drum
+    silences run from the beat after the last audible hit to the next audible hit, so
+    they start when the hits stop rather than when the last tail dies away; they mark
+    a breakdown, riser, or other gap. Bass, instruments and vocals silences start
+    where the stem goes quiet and end where it clearly returns. A drum silence can
+    end on a pickup a beat before the drop, so use kind="kicks" for the drop hit.
+    merge_gap_ms of about 150-500 joins dropouts split by a stray hit; raise min_ms
+    to about a bar for sparse material such as one hit per bar in a ballad build
+    (see get_beat_map for the tempo). Spans are found over the whole song and then
+    clipped to the window.
+
+    onsets, kicks and energy return at most max_events items; when the response has
     truncated=true, call again with start_ms=next_start_ms to continue. An invalid
-    stem, kind, resolution, max_events, or window (start_ms > end_ms) returns
-    {"error": ...} without analysing.
+    stem, kind, resolution, max_events, min_ms, merge_gap_ms, or window (start_ms >
+    end_ms) returns {"error": ...} without analysing.
 
     Served from the analysis cache when available (see analyze_song).
 
     Args:
         mp3_path: Path to the audio file
-        stem: drums | bass | vocals | other
-        kind: onsets | energy | silences
+        stem: drums | bass | vocals | other (alias: instruments)
+        kind: onsets | energy | silences | kicks
         start_ms: Window start (default: track start)
         end_ms: Window end, exclusive (default: track end)
         max_events: Maximum events or points to return
         resolution: beat | bar (energy only)
+        min_ms: Shortest silence to report (silences only)
+        merge_gap_ms: Join silences closer together than this (silences only)
     """
     from xlights_mcp.audio.stem_events import stem_events, validate_stem_query
 
     error = validate_stem_query(
-        stem, kind, resolution, max_events=max_events, start_ms=start_ms, end_ms=end_ms
+        stem,
+        kind,
+        resolution,
+        max_events=max_events,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        min_ms=min_ms,
+        merge_gap_ms=merge_gap_ms,
     )
     if error:
         return {"error": error}
@@ -607,7 +630,9 @@ async def get_stem_events(
         return {"error": f"File not found: {path}"}
 
     analysis = await _analyze_in_thread(path, ctx)
-    return stem_events(analysis, stem, kind, start_ms, end_ms, max_events, resolution)
+    return stem_events(
+        analysis, stem, kind, start_ms, end_ms, max_events, resolution, min_ms, merge_gap_ms
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -630,11 +655,12 @@ async def create_sequence(
     "auto" writes a simple baseline: quiet sections (intro, outro, breakdown) get the
     largest wash group dimmed; other sections light half of the feature groups at a
     time, alternating by height; chorus, drop and instrumental sections add short hits
-    on accent props at each downbeat. Without feature groups, the show's props take
-    turns instead. It includes Beats and Bars timing tracks, plus
-    Drums, Bass and Instruments when stems are available. It never overwrites an
-    existing sequence; it picks "<song> (generated N)" instead. For a hand-made-style
-    sequence, use the sequence_song prompt and write_sequence.
+    on accent props at each downbeat (starting at the kick when one is within 100 ms).
+    Without feature groups, the show's props take turns instead. It includes Beats and
+    Bars timing tracks, plus Drums, Bass, Instruments and Kicks when stems are
+    available. It never overwrites an existing sequence; it picks "<song> (generated N)"
+    instead. For a hand-made-style sequence, use the sequence_song prompt and
+    write_sequence.
 
     Args:
         mp3_path: Path to the .mp3 file
@@ -736,7 +762,8 @@ async def write_sequence(
             the active show folder
         name: Sequence file name without .xsq (default: the song's file name)
         timing_tracks: Any of "Beats" (labelled with the beat's position in its bar), "Bars"
-            (numbered), "Drums", "Bass", "Instruments" (stem onsets; need stem separation).
+            (numbered), "Drums", "Bass", "Instruments" (stem onsets) and "Kicks" (drum hits
+            with a kick's low end); the stem tracks need stem separation.
             Effects can reference them, e.g. E_CHOICE_VUMeter_TimingTrack=Beats.
         overwrite: Replace an existing .xsq with the same name
         validate_only: Run every check and return the report without writing

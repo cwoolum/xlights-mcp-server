@@ -287,13 +287,13 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 | `get_song_structure` | Detect song sections — verse/chorus/bridge, or intro/build/drop/breakdown/outro for tracks with a structural drum gap; sections carry `drums` (present/absent/decaying) when a drum stem was analyzed |
 | `get_beat_map` | Get beat timestamps, downbeats, tempo, and onsets — includes `beat_source` (madmom/librosa) and `drum_aligned` |
 | `get_energy_profile` | Get loudness curve and bass/mid/high frequency band energy |
-| `get_stem_events` | Per-stem onsets, energy (per beat or bar), or silences from source separation, windowed and paged |
+| `get_stem_events` | Per-stem onsets, kicks (drum hits with a kick's low end), energy (per beat or bar), or silences from source separation, windowed and paged; silences are bounded by audible hits, so a drum silence starts when the hits stop |
 
 ### Sequence Generation
 | Tool | Description |
 |------|-------------|
 | `create_sequence` | Generate a baseline `.xsq` from an `.mp3`: wash in quiet sections, feature groups taking turns, accents on downbeats (use the `sequence_song` prompt for hand-made-style sequences) |
-| `write_sequence` | Validate an effect plan (element, layer 0–2 where layer 0 draws on top, effect, times, settings, palette, optional blend mode) against the show and song, then write it as an `.xsq`, with optional Beats/Bars/stem timing tracks; `validate_only` returns the report without writing |
+| `write_sequence` | Validate an effect plan (element, layer 0–2 where layer 0 draws on top, effect, times, settings, palette, optional blend mode) against the show and song, then write it as an `.xsq`, with optional Beats/Bars/stem timing tracks (including Kicks); `validate_only` returns the report without writing |
 | `preview_plan` | Preview the generation plan without writing a file |
 
 ### Sequence Import & Remapping
@@ -331,7 +331,7 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 
 A show without feature groups lets its props take turns the same way instead; without a wash group, the quiet sections stay dark. Both are reported as warnings, and a show with nothing to light is an error.
 
-Feature-group effects follow the group's majority model type (arches get chases, trees get spirals, …): gentle effects below 0.65 energy, motion effects above. Singing-face models get a background plus a `Faces` effect driven by the assigned lyric track. While faces are sequenced, groups containing a singing model are left out so nothing lights over the face; singing models are never used as accents. Beats and Bars timing tracks are added, plus Drums, Bass and Instruments when stems are available; a track named like a model or group is skipped, and a clashing lyric track is renamed. For anything richer, use the `sequence_song` prompt, which plans a hand-made-style sequence and writes it with `write_sequence`.
+Feature-group effects follow the group's majority model type (arches get chases, trees get spirals, …): gentle effects below 0.65 energy, motion effects above. Singing-face models get a background plus a `Faces` effect driven by the assigned lyric track. While faces are sequenced, groups containing a singing model are left out so nothing lights over the face; singing models are never used as accents. Beats and Bars timing tracks are added, plus Drums, Bass, Instruments and Kicks when stems are available (accents also start on the kick when one falls within 100 ms of the downbeat); a track named like a model or group is skipped, and a clashing lyric track is renamed. For anything richer, use the `sequence_song` prompt, which plans a hand-made-style sequence and writes it with `write_sequence`.
 
 `create_sequence` returns `output_path`, `elements`, `total_effects`, `layers_used`, `palette`, `palette_unrecognised`, `timing_tracks`, `warnings`, `has_lyrics`, `singing_models` and `vocal_assignments`.
 

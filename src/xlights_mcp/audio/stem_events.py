@@ -8,11 +8,14 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from xlights_mcp.audio.silences import bounded_silences, kicks
+
 if TYPE_CHECKING:
     from xlights_mcp.audio.analyzer import SongAnalysis
 
 VALID_STEMS = ("drums", "bass", "vocals", "other")
-VALID_KINDS = ("onsets", "energy", "silences")
+VALID_KINDS = ("onsets", "energy", "silences", "kicks")
+STEM_ALIASES = {"instruments": "other"}
 VALID_RESOLUTIONS = ("beat", "bar")
 STEMS_UNAVAILABLE = (
     'Stem analysis unavailable. Install with: uv pip install -e ".[separation]" '
@@ -25,6 +28,11 @@ def _ms(t: float) -> int:
     return round(t * 1000)
 
 
+def normalize_stem(stem: str) -> str:
+    lowered = stem.lower()
+    return STEM_ALIASES.get(lowered, lowered)
+
+
 def stems_summary(analysis: SongAnalysis) -> dict[str, dict] | None:
     sa = analysis.stem_analysis
     if not sa.available:
@@ -33,7 +41,7 @@ def stems_summary(analysis: SongAnalysis) -> dict[str, dict] | None:
         name: {
             "onsets": len(s.onset_times),
             "mean_energy": round(s.mean_energy, 2),
-            "silences_ms": [[_ms(a), _ms(b)] for a, b in s.silences],
+            "silences_ms": [[_ms(a), _ms(b)] for a, b in bounded_silences(analysis, name)],
         }
         for name, s in sa.stems.items()
     }
@@ -46,11 +54,16 @@ def validate_stem_query(
     max_events: int = 500,
     start_ms: int | None = None,
     end_ms: int | None = None,
+    min_ms: int = 1000,
+    merge_gap_ms: int = 0,
 ) -> str | None:
-    if stem not in VALID_STEMS:
-        return f"Unknown stem '{stem}'. Valid: {', '.join(VALID_STEMS)}"
+    canonical = normalize_stem(stem)
+    if canonical not in VALID_STEMS:
+        return f"Unknown stem '{stem}'. Valid: drums, bass, vocals, other (or instruments)"
     if kind not in VALID_KINDS:
         return f"Unknown kind '{kind}'. Valid: {', '.join(VALID_KINDS)}"
+    if kind == "kicks" and canonical != "drums":
+        return "kind 'kicks' needs stem 'drums'"
     if resolution not in VALID_RESOLUTIONS:
         return f"Unknown resolution '{resolution}'. Valid: {', '.join(VALID_RESOLUTIONS)}"
     if max_events < 1:
@@ -59,6 +72,10 @@ def validate_stem_query(
         return "start_ms and end_ms must be >= 0"
     if start_ms is not None and end_ms is not None and start_ms > end_ms:
         return "start_ms must be <= end_ms"
+    if min_ms < 0:
+        return "min_ms must be >= 0"
+    if merge_gap_ms < 0:
+        return "merge_gap_ms must be >= 0"
     return None
 
 
@@ -70,11 +87,23 @@ def stem_events(
     end_ms: int | None = None,
     max_events: int = 500,
     resolution: str = "beat",
+    min_ms: int = 1000,
+    merge_gap_ms: int = 0,
 ) -> dict[str, Any]:
-    error = validate_stem_query(stem, kind, resolution, max_events, start_ms=start_ms, end_ms=end_ms)
+    error = validate_stem_query(
+        stem,
+        kind,
+        resolution,
+        max_events,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        min_ms=min_ms,
+        merge_gap_ms=merge_gap_ms,
+    )
     if error:
         return {"error": error}
 
+    stem = normalize_stem(stem)
     sa = analysis.stem_analysis
     if not sa.available:
         return {"error": STEMS_UNAVAILABLE}
@@ -93,9 +122,18 @@ def stem_events(
         base["count"] = len(events)
         return _truncate(base, "events_ms", events, max_events, key=lambda e: e)
 
+    if kind == "kicks":
+        try:
+            kick_times = kicks(analysis)
+        except ValueError as e:
+            return {"error": str(e)}
+        events = [_ms(t) for t in kick_times if lo_ms <= _ms(t) < hi_ms]
+        base["count"] = len(events)
+        return _truncate(base, "events_ms", events, max_events, key=lambda e: e)
+
     if kind == "silences":
         spans_ms = []
-        for a, b in s.silences:
+        for a, b in bounded_silences(analysis, stem, min_ms, merge_gap_ms):
             clip_start = max(_ms(a), lo_ms)
             clip_end = min(_ms(b), hi_ms)
             if clip_start < clip_end:

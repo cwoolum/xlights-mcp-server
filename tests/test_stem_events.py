@@ -36,7 +36,8 @@ def test_summary_reports_counts_energy_and_silences_in_ms(analysis):
     assert isinstance(drums["mean_energy"], float)
     assert len(drums["silences_ms"]) == 1
     start, end = drums["silences_ms"][0]
-    assert isinstance(start, int) and 7700 < start < 7900 and 11900 < end < 12100
+    # Last hit of the first run is 7.5 s; the beat after it is 8.0 s, and the next hit is 12.0 s.
+    assert isinstance(start, int) and (start, end) == (8000, 12000)
 
 
 def test_summary_is_none_without_stems(analysis):
@@ -79,12 +80,11 @@ def test_silences_are_clipped_to_window(analysis):
     payload = stem_events(analysis, "drums", "silences", start_ms=10000)
 
     start, end = payload["spans_ms"][0]
-    assert start == 10000
-    assert 11900 < end < 12100
+    assert (start, end) == (10000, 12000)
 
 
 def test_silences_zero_length_window_returns_empty(analysis):
-    # 9000ms falls inside the drum-gap silence (~7755-12005ms); an equal
+    # 9000ms falls inside the drum-gap silence (8000-12000ms); an equal
     # start/end window clips to a zero-length span, which must be dropped.
     payload = stem_events(analysis, "drums", "silences", start_ms=9000, end_ms=9000)
 
@@ -224,6 +224,91 @@ def test_energy_empty_grid_returns_single_span(analysis):
 )
 def test_invalid_stem_or_kind_lists_valid_values(analysis, args, needle):
     assert needle in stem_events(analysis, *args)["error"]
+
+
+def test_kicks_are_windowed_ms(analysis):
+    payload = stem_events(analysis, "drums", "kicks", start_ms=1000, end_ms=3000)
+
+    assert payload["events_ms"] == [1000, 1500, 2000, 2500]
+    assert payload["count"] == 4
+    assert payload["kind"] == "kicks"
+
+
+def test_kicks_skip_drum_hits_without_a_kick_low_end(analysis):
+    drums = analysis.stem_analysis.stems["drums"]
+    drums.onset_times = [1.0, 2.0, 3.0]
+    drums.onset_bass = [0.9, 0.1, 0.5]
+
+    assert stem_events(analysis, "drums", "kicks")["events_ms"] == [1000, 3000]
+
+
+def test_kicks_truncate_with_resume_point(analysis):
+    payload = stem_events(analysis, "drums", "kicks", max_events=3)
+
+    assert payload["events_ms"] == [0, 500, 1000]
+    assert payload["truncated"] is True
+    assert payload["next_start_ms"] == 1500
+
+
+def test_kicks_need_the_drums_stem(analysis):
+    payload = stem_events(analysis, "bass", "kicks")
+
+    assert payload["error"] == "kind 'kicks' needs stem 'drums'"
+
+
+def test_kicks_report_mismatched_bass_levels_as_an_error(analysis):
+    analysis.stem_analysis.stems["drums"].onset_bass = []
+
+    assert "force=true" in stem_events(analysis, "drums", "kicks")["error"]
+
+
+@pytest.mark.parametrize("alias", ["instruments", "Instruments", "OTHER"])
+def test_instruments_is_an_alias_for_other(analysis, alias):
+    analysis.stem_analysis.stems["other"] = make_drum_stem([(0, 4)], duration=20.0, name="other")
+
+    payload = stem_events(analysis, alias, "onsets")
+
+    assert payload["stem"] == "other"
+    assert payload["count"] == 8
+
+
+def test_validate_stem_query_normalises_the_stem_and_lists_the_alias():
+    assert validate_stem_query("Instruments", "onsets", "beat") is None
+    assert "other (or instruments)" in validate_stem_query("kick", "onsets", "beat")
+
+
+@pytest.fixture
+def two_gaps(analysis) -> SongAnalysis:
+    analysis.stem_analysis.stems["drums"] = make_drum_stem(
+        [(0, 4), (6, 10), (12, 20)], duration=20.0
+    )
+    return analysis
+
+
+def test_min_ms_drops_short_silences(two_gaps):
+    both = stem_events(two_gaps, "drums", "silences", min_ms=1500)
+    none = stem_events(two_gaps, "drums", "silences", min_ms=2500)
+
+    assert both["spans_ms"] == [[4000, 6000], [10000, 12000]]
+    assert none["spans_ms"] == []
+
+
+def test_merge_gap_ms_joins_nearby_silences(two_gaps):
+    apart = stem_events(two_gaps, "drums", "silences", merge_gap_ms=3000)
+    joined = stem_events(two_gaps, "drums", "silences", merge_gap_ms=4500)
+
+    assert apart["spans_ms"] == [[4000, 6000], [10000, 12000]]
+    assert joined["spans_ms"] == [[4000, 12000]]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [({"min_ms": -1}, "min_ms must be >= 0"), ({"merge_gap_ms": -1}, "merge_gap_ms must be >= 0")],
+)
+def test_negative_min_ms_or_merge_gap_ms_errors(analysis, kwargs, message):
+    assert stem_events(analysis, "drums", "silences", **kwargs)["error"] == message
+    assert stem_events(analysis, "drums", "onsets", **kwargs)["error"] == message
+    assert validate_stem_query("drums", "onsets", "beat", **kwargs) == message
 
 
 def test_invalid_resolution_errors(analysis):
