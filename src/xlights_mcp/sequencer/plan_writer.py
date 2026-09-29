@@ -39,20 +39,25 @@ def write_plan(
         f"timing track {track!r} appears more than once"
         for track, n in Counter(t.name for t in tracks).items() if n > 1
     ]
+    element_names = {m.name for m in show.models} | {g.name for g in show.model_groups}
+    errors += [
+        f"timing track {t.name!r} has the same name as a model or group in the show"
+        for t in tracks if t.name in element_names
+    ]
 
     stem = _XSQ_SUFFIX.sub("", name) if name is not None else mp3_path.stem
     file_name = f"{stem}.xsq"
-    output = show_path / file_name
-    if name is not None and (
-        not stem.strip(" .") or Path(file_name).name != file_name or _INVALID_NAME_CHARS.search(stem)
-    ):
-        errors.append(f"name must be a plain file name without folders, got {name!r}")
+    output: Path | None = show_path / file_name
+    name_error = _name_error(name, stem) if name is not None else None
+    if name_error:
+        errors.append(name_error)
+        output = None
     elif output.exists() and not overwrite:
         errors.append(f"{file_name} already exists; pass overwrite=true to replace it")
 
     placements = validated.placements
     report = {
-        "path": str(output),
+        "path": str(output) if output else None,
         "written": False,
         "elements": len({p.model_name for p in placements}),
         "effects": len(placements),
@@ -75,6 +80,15 @@ def write_plan(
     write_xsq(spec, show, output)
     report["written"] = True
     return report
+
+
+def _name_error(name: str, stem: str) -> str | None:
+    if not stem.strip(" .") or "/" in stem or "\\" in stem:
+        return f"name must be a file name without folders, got {name!r}"
+    bad = _INVALID_NAME_CHARS.search(stem)
+    if bad:
+        return f"name contains a character Windows doesn't allow in file names ({bad.group()!r}), got {name!r}"
+    return None
 
 
 def _capped(errors: list[str]) -> list[str]:

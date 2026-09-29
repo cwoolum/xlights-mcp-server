@@ -644,8 +644,9 @@ async def write_sequence(
     "adjusted"). Any error writes nothing: overlapping placements on the same element and layer,
     a bad layer, bad times (non-numeric, negative, empty after rounding, or starting at or after
     the song end), an unknown element or effect, an unknown placement or palette key (e.g. a
-    misspelt "pallete"), malformed settings or palette, an unknown or duplicate timing track, or
-    an existing file without overwrite. A group lit while a group or model inside it is also lit
+    misspelt "pallete"), malformed settings or palette, an unknown or duplicate timing track (a
+    timing track can't share a name with a model or group), an invalid name, or an existing file
+    without overwrite. A group lit while a group or model inside it is also lit
     is a warning. The report lists at most 50 errors.
 
     Args:

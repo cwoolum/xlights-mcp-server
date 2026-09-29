@@ -83,8 +83,29 @@ def test_name_sets_the_file_name_and_rejects_paths(show):
     assert _write(show, name="My Show")["path"] == str(show / "My Show.xsq")
     assert _write(show, name="Other.xsq", validate_only=True)["path"] == str(show / "Other.xsq")
     assert _write(show, name="Foo.XSQ", validate_only=True)["path"] == str(show / "Foo.xsq")
-    for bad in ("../escape", "..", " ", "a?b", "a\\b", 'a"b', "a\x01b"):
-        assert "name" in _write(show, name=bad)["errors"][0]
+    for bad in ("../escape", "..", " ", "a\\b", "a/b"):
+        assert "without folders" in _write(show, name=bad)["errors"][0]
+
+
+def test_names_windows_forbids_are_an_error_naming_the_character(show):
+    for bad, char in (("a?b", "?"), ('a"b', '"'), ("Who Let the Dogs Out?", "?"), ("a*b", "*")):
+        error = _write(show, name=bad)["errors"][0]
+        assert "Windows doesn't allow" in error and repr(char) in error
+    assert "Windows doesn't allow" in _write(show, name="a\x01b")["errors"][0]
+
+
+def test_an_invalid_name_leaves_the_report_path_empty(show):
+    assert _write(show, name="a?b")["path"] is None
+    assert _write(show, name="../x")["path"] is None
+
+
+def test_a_timing_track_cannot_share_a_name_with_a_model_or_group(show):
+    extra = TimingTrack(name="Lanterns", labels=[[]])
+
+    report = _write(show, extra_tracks=[extra])
+
+    assert any("'Lanterns'" in e and "same name as a model or group" in e for e in report["errors"])
+    assert not (show / "Song.xsq").exists()
 
 
 def test_duplicate_timing_track_names_are_an_error(show):
