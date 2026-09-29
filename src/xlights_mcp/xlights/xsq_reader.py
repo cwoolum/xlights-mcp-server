@@ -8,7 +8,11 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from xlights_mcp.xlights.xsq_writer import is_generated_sequence
+
 logger = logging.getLogger(__name__)
+
+_HEAD_BYTES = 4096
 
 
 class EffectSummary(BaseModel):
@@ -171,6 +175,18 @@ def read_xsq_effect_db(xsq_path: Path) -> list[dict]:
                 settings[key.strip()] = val.strip()
         result.append({"index": i, "raw": text[:200], "settings": settings})
     return result
+
+
+def is_generated_file(xsq_path: Path) -> bool:
+    """True when the sequence was written by this server's generator."""
+    with open(xsq_path, "rb") as f:
+        return is_generated_sequence(f.read(_HEAD_BYTES))
+
+
+def latest_hand_made_sequence(show_path: Path) -> Path | None:
+    """The most recently modified .xsq in the folder that this server didn't generate."""
+    hand_made = [p for p in show_path.glob("*.xsq") if not is_generated_file(p)]
+    return max(hand_made, key=lambda p: p.stat().st_mtime, default=None)
 
 
 def _text(parent: ET.Element, tag: str, default: str = "") -> str:

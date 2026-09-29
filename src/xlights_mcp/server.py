@@ -7,6 +7,7 @@ import logging
 import tempfile
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import anyio
@@ -45,6 +46,14 @@ def _active_show(config: ServerConfig) -> Path | dict:
             "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
         }
     return show_path
+
+
+def _show_file(show_path: Path, value: str, suffix: str = "") -> Path:
+    """`value` as a path: relative ones resolve against the show folder; `suffix` is added when missing."""
+    path = Path(value).expanduser()
+    if suffix and path.suffix.lower() != suffix:
+        path = path.with_name(path.name + suffix)
+    return path if path.is_absolute() else show_path / path
 
 
 def _resolve_show(config: ServerConfig, show_name: str | None) -> dict | Path:
@@ -269,7 +278,13 @@ def list_controllers() -> dict:
 
 @mcp.tool()
 def list_sequences() -> dict:
-    """List all sequences (.xsq files) in the active show folder."""
+    """List all sequences (.xsq files) in the active show folder.
+
+    `generated` is true for sequences written by create_sequence/write_sequence, false for
+    hand-made ones. `modified` is the file's last-modified time.
+    """
+    from xlights_mcp.xlights.xsq_reader import is_generated_file
+
     config = get_config()
     show_path = _active_show(config)
     if isinstance(show_path, dict):
@@ -277,7 +292,16 @@ def list_sequences() -> dict:
 
     sequences = []
     for xsq in sorted(show_path.glob("*.xsq")):
-        sequences.append({"name": xsq.stem, "path": str(xsq)})
+        sequences.append(
+            {
+                "name": xsq.stem,
+                "path": str(xsq),
+                "generated": is_generated_file(xsq),
+                "modified": datetime.fromtimestamp(xsq.stat().st_mtime, tz=timezone.utc)
+                .astimezone()
+                .isoformat(timespec="seconds"),
+            }
+        )
     return {
         "show": config.active_show,
         "sequence_count": len(sequences),
@@ -297,11 +321,11 @@ def inspect_sequence(sequence_name: str) -> dict:
     from xlights_mcp.xlights.xsq_reader import read_xsq_summary
 
     config = get_config()
-    show_path = config.active_show_path
-    if not show_path:
-        return {"error": "No active show configured"}
+    show_path = _active_show(config)
+    if isinstance(show_path, dict):
+        return show_path
 
-    xsq_path = show_path / f"{sequence_name}.xsq"
+    xsq_path = _show_file(show_path, sequence_name, ".xsq")
     if not xsq_path.exists():
         return {"error": f"Sequence not found: {xsq_path}"}
 
@@ -666,9 +690,7 @@ async def write_sequence(
     if (plan is None) == (plan_path is None):
         return {"error": "Pass exactly one of plan or plan_path."}
     if plan_path is not None:
-        plan_file = Path(plan_path).expanduser()
-        if not plan_file.is_absolute():
-            plan_file = show_path / plan_file
+        plan_file = _show_file(show_path, plan_path)
         try:
             plan = json.loads(plan_file.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError) as e:
