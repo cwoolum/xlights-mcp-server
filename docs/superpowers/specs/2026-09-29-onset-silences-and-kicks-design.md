@@ -40,6 +40,9 @@ bounded_silences(analysis, stem, min_ms=1000, merge_gap_ms=0) -> list[tuple[floa
 The spans are computed over the whole song from the cached `onset_times`, the stored energy silences, the energy curve, the beat grid and the duration. Onsets are sorted and deduplicated first.
 
 **Drums** are purely percussive, so hits bound their silences:
+- Only audible hits count. A hit at `t` counts when the drum energy reaches `SILENCE_THRESHOLD` (0.05) somewhere in `[t - 0.03, t + 0.1]` s.
+  - Quieter onsets are bleed from other instruments, 27–39 dB below the mix. A hit too quiet to end an energy silence shouldn't end a hit silence either.
+  - `kicks()` isn't affected; no ghost hit on the eight test songs reaches the kick threshold.
 - The candidate spans are:
   - the gap before the first hit, `[0, first)`;
   - the gaps between consecutive hits `a` and `b`, as `[beat_after(a), b)`;
@@ -47,6 +50,7 @@ The spans are computed over the whole song from the cached `onset_times`, the st
 - A drum stem with no hits is one span covering the whole song.
 - `beat_after(t)` is the first grid beat strictly later than `t + 0.1 s`, so a hit on or up to 100 ms before a beat moves to the next beat. When there's no such beat, or the grid has fewer than 2 beats, `beat_after(t)` is `t + beat_period`. `beat_period` is the median grid interval, or 0.5 s when the grid has fewer than 2 beats.
 - Spans with `end <= start` are dropped.
+- **Roll veto:** a candidate whose median drum energy is at least `3 × SILENCE_THRESHOLD` (0.15) is dropped. That covers drum rolls and orchestral swells, which are loud but have no detected hits.
 
 **Bass, other, vocals** are sustained, so a held note has no new hit but is still sounding. For each stored energy silence `[s, e)`:
 - The start stays `s`.
@@ -74,8 +78,8 @@ Filtering before merging matters: merging first would chain the tiny gaps betwee
 
 For bass, other and vocals, a `min_ms` below 1000 has no effect, because their stored silences are already at least 1 s long (`MIN_SILENCE_S`).
 
-On Ghosts, the defaults give 5 drum spans: [0, 7.036), [51.710, 65.945), [110.540, 137.509), [137.650, 139.482), [184.041, 187.288).
-- With `merge_gap_ms=500`, the two breakdown spans join into [110.540, 139.482).
+On Ghosts, the defaults give 4 drum spans: [0, 7.036), [51.710, 65.945), [110.540, 139.482), [184.041, 187.288).
+- The breakdown is a single span because its stray FX onset at 137.509 is a ghost hit (peak energy 0.028).
 - A drum silence can end on a kickless pickup a beat before the drop: 65.945 and 139.482 here. The drop's own hit is the next kick.
 
 ## Kicks
@@ -96,7 +100,8 @@ On Ghosts, the defaults give 5 drum spans: [0, 7.036), [51.710, 65.945), [110.54
 - **The `instruments` alias:** `stem` is matched case-insensitively, and `"instruments"` means `other`. The alias is resolved before validation and listed in the "Unknown stem" message. The response reports `stem: "other"`.
 - **Docstring:** one line each on the drum and sustained rules. It also says:
   - a drum silence can end on a pickup, so use `kind="kicks"` for the drop hit;
-  - `merge_gap_ms` of about 150–500 joins silences split by a stray hi-hat or FX hit.
+  - `merge_gap_ms` of about 150–500 joins silences split by a stray hit;
+  - for sparse material, such as one hit per bar in a ballad build, raise `min_ms` to about one bar (see `get_beat_map` for the tempo).
 
 **`analyze_song`:** the `stems.<name>.silences_ms` summary uses `bounded_silences` with default parameters, clamped to the duration, so it agrees with `get_stem_events`. The docstring notes that `sections[].drums` still comes from the energy-based structure analysis.
 
@@ -123,7 +128,9 @@ On Ghosts, the defaults give 5 drum spans: [0, 7.036), [51.710, 65.945), [110.54
   - an empty stem is silent throughout;
   - a hit on a beat, or up to 100 ms before it, moves to the next beat;
   - a span past the end of the grid uses `beat_period`, and a grid with fewer than 2 beats uses 0.5 s;
-  - duplicate onsets are handled.
+  - duplicate onsets are handled;
+  - a quiet ghost onset (energy under 0.05 around it) doesn't split a silence or mark a silent stretch present;
+  - a candidate with median energy of at least 0.15 and no hits (a roll) is dropped.
 - **Sustained stems:**
   - the end moves to the hit where energy returns above 0.1 (the rumble case);
   - a held note right after a silence, with no hit and energy above 0.1, keeps the stored end (the intro-bass case);
@@ -153,6 +160,32 @@ On Ghosts, the defaults give 5 drum spans: [0, 7.036), [51.710, 65.945), [110.54
 - the bridge bass silence ends at 125.272;
 - the intro bass silence still ends at about 7.7;
 - drums are silent across 125.4–129.8 s;
-- `merge_gap_ms=500` joins the breakdown into [110.540, 139.482);
+- the breakdown is one span, [110.540, 139.482), at the default `merge_gap_ms=0`;
 - every accent within 100 ms of a kick sits on the kick's frame, and the 4 that were 64–87 ms late
   move by two or more frames (for example 79.290 → 79.226 and 149.140 → 149.072).
+
+## Cross-song validation
+
+The rules were checked on eight songs chosen for different styles, analysed with stems:
+
+| Song | Style | BPM |
+|---|---|---|
+| Ghosts 'n' Stuff | EDM | 130 |
+| Deck the Halls Remix | EDM | 130 |
+| Carnival (Xmas Edition) | soca | 130 |
+| Remains of the Day | swing | 162 |
+| Let It Go (Idina Menzel) | ballad | 136 |
+| Superstition | live funk | 102 |
+| Dance of the Sugar Plum Fairy (Pentatonix) | a cappella and beatbox | 154 |
+| Beetlejuice Main Title | orchestral | 146 |
+
+The first draft only covered Ghosts. It overfit the drum rule in two places:
+- **Ghost hits** split real silences or marked silent stretches present. Let It Go's silent first 88 s came back as 7 fragments with about 35 s marked "present", and Sugar Plum's opening split into 9 spans. Corpse Bride, Deck's intro and Superstition's fade-out were also affected.
+- **Rolls and swells** were called silent: Carnival's build roll at median energy 0.58, and six Beetlejuice spans.
+
+The audible-hit filter and the roll veto fix both, and the Ghosts checks above still hold. The closest calls on the veto: the highest median it keeps is 0.10 and the lowest it drops is 0.18.
+
+Checked and deliberately not changed:
+- **A tempo-relative minimum length**, such as one bar. It deletes real 3-beat stops, for example three in Deck, including the stop before a drop. Sparse patterns with one audible hit per bar, like Let It Go's build and Beetlejuice's outro, still produce short spans. The stored energy method produces the same ones, so the docstring points to `min_ms` instead.
+- **A stem-relative exit threshold for sustained stems.** Stems with a low median are absent most of the time; their level while playing is 0.14–0.74, always above 0.1. Every added stretch has mean energy of 0.08 or less, and extensions over 2 bars have 0.03 or less.
+- **The kick threshold.** Accent-snap shifts above 25 ms are 0–4 per song, all early kicks, at most 92 ms. Songs with few kicks (Let It Go, Sugar Plum) correctly keep accents on the grid. 0.3 matches bar-1 anchoring. Soft-kick songs vary in kick count between 0.2 and 0.4, but accents don't.
