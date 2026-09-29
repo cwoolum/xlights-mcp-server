@@ -17,8 +17,8 @@ def _p(**over) -> dict:
     return {"element": "Door", "layer": 0, "effect": "On", "start_ms": 1000, "end_ms": 2000, **over}
 
 
-def _validate(*placements, duration_ms: int = 20000):
-    return validate_plan(list(placements), SHOW, duration_ms, XLIGHTS_EFFECT_NAMES)
+def _validate(*placements, duration_ms: int = 20000, effect_names=XLIGHTS_EFFECT_NAMES):
+    return validate_plan(list(placements), SHOW, duration_ms, effect_names)
 
 
 def test_a_valid_placement_passes():
@@ -153,7 +153,7 @@ def test_other_effect_aliases_suggest_their_target():
 
 
 def test_effect_names_come_from_the_given_set():
-    result = validate_plan([_p(effect="Custom Thing")], SHOW, 20000, XLIGHTS_EFFECT_NAMES | {"Custom Thing"})
+    result = _validate(_p(effect="Custom Thing"), effect_names=XLIGHTS_EFFECT_NAMES | {"Custom Thing"})
 
     assert result.errors == []
 

@@ -18,9 +18,9 @@ from xlights_mcp.xlights.xsq_writer import (
 SHOW = ShowConfig(show_path=".", show_name="test")
 
 
-def _write(tmp_path: Path, *effects: EffectPlacement) -> ET.Element:
+def _write(tmp_path: Path, *effects: EffectPlacement, **spec_kw) -> ET.Element:
     out = tmp_path / "s.xsq"
-    write_xsq(SequenceSpec(duration_ms=10000, effects=list(effects)), SHOW, out)
+    write_xsq(SequenceSpec(duration_ms=10000, effects=list(effects), **spec_kw), SHOW, out)
     return ET.parse(out).getroot()
 
 
@@ -76,13 +76,10 @@ def test_settings_keep_their_order_and_every_effect_refs_them(tmp_path):
 
 
 def test_timing_tracks_come_before_models_in_both_element_lists(tmp_path):
-    out = tmp_path / "s.xsq"
     track = TimingTrack(name="Beats", labels=[[TimingTrackLabel(label="1", start_time_ms=0, end_time_ms=500)]])
-    spec = SequenceSpec(duration_ms=10000, effects=[_on("Roof")], timing_tracks=[track])
 
-    write_xsq(spec, SHOW, out)
+    root = _write(tmp_path, _on("Roof"), timing_tracks=[track])
 
-    root = ET.parse(out).getroot()
     display = root.findall("DisplayElements/Element")
     assert [(e.get("type"), e.get("name")) for e in display] == [("timing", "Beats"), ("model", "Roof")]
     assert display[0].get("views") == ""
