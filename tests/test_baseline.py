@@ -14,6 +14,7 @@ from xlights_mcp.sequencer.engine import (
     MOTION_EFFECTS,
     WASH_BRIGHTNESS,
     _effect_name_from_key,
+    _face_placements,
     build_baseline_plan,
 )
 from xlights_mcp.sequencer.plan import validate_plan
@@ -146,6 +147,23 @@ def test_a_downbeat_in_the_last_frame_gets_no_accent():
 
     assert [p["start_ms"] for p in plan if p["layer"] == 1] == [0, 2000, 4000, 6000, 8000]
     assert validate_plan(plan, SHOW, analysis.duration_ms, XLIGHTS_EFFECT_NAMES).errors == []
+
+
+LAST_FRAME_SECTION = _sections(10.02, [0.0, 2.0, 4.0, 6.0, 8.0], ("chorus", 0, 9.99, 0.8), ("verse", 9.99, 10.02, 0.5))
+
+
+def test_a_section_starting_in_the_last_frame_is_skipped():
+    plan = build_baseline_plan(LAST_FRAME_SECTION, SHOW, COLORS)
+
+    assert max(p["start_ms"] for p in plan) < 10000
+    assert validate_plan(plan, SHOW, LAST_FRAME_SECTION.duration_ms, XLIGHTS_EFFECT_NAMES).errors == []
+
+
+def test_face_backgrounds_skip_a_section_starting_in_the_last_frame():
+    plan = _face_placements(LAST_FRAME_SECTION, "Lantern2", "Singing Face", "Vocals", COLORS)
+
+    assert [(p["effect"], p["start_ms"], p["end_ms"]) for p in plan if p["layer"] == 0] == [("Twinkle", 0, 10000)]
+    assert validate_plan(plan, SHOW, LAST_FRAME_SECTION.duration_ms, XLIGHTS_EFFECT_NAMES).errors == []
 
 
 def test_a_show_without_feature_groups_gets_no_feature_or_accent_placements():

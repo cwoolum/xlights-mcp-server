@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Literal
 
 from xlights_mcp.audio.analyzer import ProgressCallback, SongAnalysis, full_analysis
+from xlights_mcp.audio.lyrics import LyricTrack
+from xlights_mcp.audio.sections import SongSection
 from xlights_mcp.config import AudioConfig
 from xlights_mcp.sequencer.plan_writer import write_plan
 from xlights_mcp.sequencer.timing import last_frame_ms, to_frame
@@ -264,17 +266,24 @@ def _free_sequence_name(show_path: Path, stem: str) -> str:
     return name
 
 
-def _lyric_timing_track(track) -> TimingTrack:
-    words = [
-        TimingTrackLabel(
-            label=w.word, start_time_ms=int(w.start_time * 1000), end_time_ms=int(w.end_time * 1000)
-        )
-        for w in track.words
-    ]
-    phonemes = [
-        TimingTrackLabel(label=p.phoneme, start_time_ms=p.start_time_ms, end_time_ms=p.end_time_ms)
-        for p in track.phonemes
-    ]
+def _framed_marks(marks: list[tuple[str, float, float]], song_end: int) -> list[TimingTrackLabel]:
+    """Frame-rounded marks clipped to the song, sorted, each ending by the next one's start."""
+    framed = sorted(
+        (to_frame(start), min(to_frame(end), song_end), label) for label, start, end in marks
+    )
+    framed = [m for m in framed if m[1] > m[0]]
+    labels = []
+    for k, (start, end, label) in enumerate(framed):
+        if k + 1 < len(framed):
+            end = min(end, framed[k + 1][0])
+        if end > start:
+            labels.append(TimingTrackLabel(label=label, start_time_ms=start, end_time_ms=end))
+    return labels
+
+
+def _lyric_timing_track(track: LyricTrack, song_end: int) -> TimingTrack:
+    words = _framed_marks([(w.word, w.start_time * 1000, w.end_time * 1000) for w in track.words], song_end)
+    phonemes = _framed_marks([(p.phoneme, p.start_time_ms, p.end_time_ms) for p in track.phonemes], song_end)
     return TimingTrack(name=track.track_name, labels=[words, words, phonemes])
 
 
@@ -282,9 +291,11 @@ def _face_placements(
     analysis: SongAnalysis, model: str, face_definition: str, track_name: str, colors: list[str]
 ) -> list[dict]:
     palette = {"colors": colors}
+    song_end = last_frame_ms(analysis.duration_ms)
     plan = []
     for index, section in enumerate(analysis.sections):
-        if to_frame(section.end_time_ms) <= to_frame(section.start_time_ms):
+        span = _section_span(section, song_end)
+        if span is None:
             continue
         if section.energy_level >= HIGH_ENERGY_THRESHOLD:
             key = "Twinkle_dense"
@@ -292,7 +303,7 @@ def _face_placements(
             key = "ColorWash_slow"
         else:
             key = FACE_BED_KEYS[index % len(FACE_BED_KEYS)]
-        plan.append(_placement(model, 0, key, section.start_time_ms, section.end_time_ms, palette))
+        plan.append(_placement(model, 0, key, *span, palette))
     plan.append({
         "element": model, "layer": 1, "effect": "Faces", "start_ms": 0, "end_ms": analysis.duration_ms,
         "settings": {
@@ -356,7 +367,8 @@ def _generate_auto(
                 track = by_name.get(requested, vocal_tracks[0])
                 assignments[model] = track.track_name
                 faces.extend(_face_placements(analysis, model, face_definition, track.track_name, colors))
-            lyric_tracks = [_lyric_timing_track(t) for t in vocal_tracks]
+            song_end = last_frame_ms(analysis.duration_ms)
+            lyric_tracks = [_lyric_timing_track(t, song_end) for t in vocal_tracks]
 
     baseline = build_baseline_plan(analysis, show_config, colors, frozenset(singing) if faces else frozenset())
     plan = [p for p in baseline if p["element"] not in singing] + faces
@@ -484,6 +496,12 @@ def _group_categories(show: ShowConfig) -> dict[str, str]:
     return categories
 
 
+def _section_span(section: SongSection, song_end: int) -> tuple[int, int] | None:
+    """The section's frame-rounded (start, end), clipped to the song; None when nothing is left."""
+    start, end = to_frame(section.start_time_ms), min(to_frame(section.end_time_ms), song_end)
+    return (start, end) if end > start else None
+
+
 def _placement(element: str, layer: int, key: str, start_ms: int, end_ms: int, palette: dict) -> dict:
     return {
         "element": element, "layer": layer, "effect": _effect_name_from_key(key),
@@ -520,9 +538,10 @@ def build_baseline_plan(
     plan: list[dict] = []
     feature_turn = accent_turn = 0
     for index, section in enumerate(analysis.sections):
-        start, end = section.start_time_ms, section.end_time_ms
-        if to_frame(end) <= to_frame(start):
+        span = _section_span(section, song_end)
+        if span is None:
             continue
+        start, end = span
         role = SECTION_TYPE_CONFIG.get(section.label, "features")
         if role == "wash":
             if wash:

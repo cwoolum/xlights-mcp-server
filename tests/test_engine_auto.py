@@ -98,6 +98,31 @@ def _lyrics() -> LyricTrack:
     )
 
 
+def test_lyric_marks_sit_on_the_frame_grid_without_overlapping():
+    track = LyricTrack(
+        words=[
+            LyricWord(word="gone", start_time=1.0, end_time=1.0),
+            LyricWord(word="off", start_time=2.01, end_time=2.49),
+            LyricWord(word="late", start_time=3.5, end_time=4.0),
+            LyricWord(word="early", start_time=3.0, end_time=3.6),
+            LyricWord(word="end", start_time=9.9, end_time=10.5),
+        ],
+        phonemes=[
+            PhonemeEvent(phoneme="U", start_time_ms=1000, end_time_ms=1010),
+            PhonemeEvent(phoneme="O", start_time_ms=2010, end_time_ms=2490),
+        ],
+        track_name="Vocals",
+        available=True,
+    )
+
+    words, _, phonemes = engine._lyric_timing_track(track, 10000).labels
+
+    assert [(m.label, m.start_time_ms, m.end_time_ms) for m in words] == [
+        ("off", 2000, 2500), ("early", 3000, 3500), ("late", 3500, 4000), ("end", 9900, 10000),
+    ]
+    assert [(m.label, m.start_time_ms, m.end_time_ms) for m in phonemes] == [("O", 2000, 2500)]
+
+
 def test_singing_models_without_lyrics_get_no_effects_and_a_warning(click_track, singing_show, audio, monkeypatch):
     monkeypatch.setattr(engine, "_try_extract_vocal_tracks", lambda _path: [])
 
