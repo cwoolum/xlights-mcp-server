@@ -928,6 +928,24 @@ async def remap_sequence(
     ).model_dump()
 
 
+@mcp.prompt()
+def sequence_song(mp3_path: str, reference_sequence: str | None = None) -> str:
+    """Plan and write a hand-made-style sequence for a song using the show's groups."""
+    from xlights_mcp.prompts import render_sequence_song
+    from xlights_mcp.xlights.xsq_reader import latest_hand_made_sequence
+
+    show_path = get_config().active_show_path
+    reference, notes = reference_sequence, None
+    if show_path and show_path.exists():
+        if not reference:
+            latest = latest_hand_made_sequence(show_path)
+            reference = latest.name if latest else None
+        notes_file = show_path / ".claude" / "CLAUDE.md"
+        if notes_file.exists():
+            notes = notes_file.read_text(encoding="utf-8-sig")
+    return render_sequence_song(mp3_path, reference, notes)
+
+
 # ---------------------------------------------------------------------------
 # FPP Integration Tools
 # ---------------------------------------------------------------------------

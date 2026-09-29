@@ -311,6 +311,11 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 | `fpp_start_playlist` | Start a playlist (with optional repeat) |
 | `fpp_stop` | Stop current playback |
 
+### Prompts
+| Prompt | Description |
+|--------|-------------|
+| `sequence_song` | Playbook for a hand-made-style sequence: analyse the song, read the show layout, profile a hand-made reference sequence (the most recent one by default), plan section by section, then validate and write with `write_sequence`. Includes the show folder's `.claude/CLAUDE.md` when present |
+
 ---
 
 ## How It Works
@@ -357,9 +362,13 @@ xlights-mcp-server/
 │   │   ├── show.py            # Show folder parser (networks + models XML)
 │   │   ├── xsq_reader.py     # Parse existing .xsq sequences
 │   │   ├── xsq_writer.py     # Generate .xsq XML files
+│   │   ├── profile.py         # Style profile of a hand-made sequence
 │   │   ├── effects.py         # Effect library & model/music mappings
 │   │   ├── palettes.py        # Color palette definitions & themes
 │   │   └── models.py          # Data models (Controller, LightModel, etc.)
+│   ├── prompts/
+│   │   ├── __init__.py        # Renders the sequence_song prompt
+│   │   └── sequence_song.md   # Playbook template
 │   ├── sequencer/
 │   │   └── engine.py          # Sequence generation engine (auto/guided/template)
 │   └── fpp/
