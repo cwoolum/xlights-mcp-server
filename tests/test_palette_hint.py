@@ -26,7 +26,7 @@ def test_unrecognised_words_are_reported():
 
 
 def test_at_most_eight_colours():
-    hint = ", ".join(["red", "green", "blue", "white", "yellow", "orange", "gold", "purple", "pink"])
+    hint = "red, green, blue, white, yellow, orange, gold, purple, pink"
 
     assert len(parse_palette_hint(hint)[0]) == 8
 

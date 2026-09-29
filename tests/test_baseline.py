@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from show_fixtures import SHOW_GROUPS, make_analysis
 
 from xlights_mcp.audio.sections import SongSection
-from xlights_mcp.sequencer.engine import ACCENT_MS, WASH_BRIGHTNESS, build_baseline_plan
+from xlights_mcp.sequencer.engine import (
+    ACCENT_MS,
+    BED_EFFECTS,
+    FACE_BED_KEYS,
+    MOTION_EFFECTS,
+    WASH_BRIGHTNESS,
+    _effect_name_from_key,
+    build_baseline_plan,
+)
 from xlights_mcp.sequencer.plan import validate_plan
 from xlights_mcp.xlights.effects import XLIGHTS_EFFECT_NAMES
 from xlights_mcp.xlights.show import load_show_config
@@ -45,6 +54,7 @@ def test_the_plan_passes_the_writer_checks():
     result = validate_plan(_plan(), SHOW, 60000, XLIGHTS_EFFECT_NAMES)
 
     assert result.errors == []
+    assert result.warnings == []
 
 
 def test_elements_are_wash_or_feature_groups_or_accent_props_on_layers_0_and_1():
@@ -94,8 +104,6 @@ def test_groups_holding_excluded_models_are_left_out():
 
 
 def test_every_table_key_is_a_known_xlights_effect():
-    from xlights_mcp.sequencer.engine import BED_EFFECTS, FACE_BED_KEYS, MOTION_EFFECTS, _effect_name_from_key
-
     keys = {k for table in (BED_EFFECTS, MOTION_EFFECTS) for ks in table.values() for k in ks}
     keys |= {"ColorWash_slow", "On_solid", "Twinkle_dense", *FACE_BED_KEYS}
     assert {_effect_name_from_key(k) for k in keys} <= XLIGHTS_EFFECT_NAMES
@@ -105,3 +113,45 @@ def test_without_a_wash_group_quiet_sections_stay_dark():
     plan = _plan(exclude=frozenset({"Door L", "Lantern2"}))
 
     assert _within(plan, 0, 8) == []
+
+
+def _sections(duration_s, downbeats, *sections):
+    return make_analysis(
+        duration_s, [], downbeats,
+        sections=[SongSection(label=l, start_time=s, end_time=e, energy_level=en) for l, s, e, en in sections],
+    )
+
+
+def test_an_unknown_section_label_is_treated_as_features():
+    plan = build_baseline_plan(_sections(8.0, [0.0, 2.0, 4.0, 6.0], ("mystery", 0, 8, 0.5)), SHOW, COLORS)
+
+    assert {p["element"] for p in plan} == {"Pipes", "Legacy Arches", "Door"}
+    assert {p["layer"] for p in plan} == {0}
+
+
+@pytest.mark.parametrize("end_s", [4.0, 4.01])
+def test_a_section_shorter_than_one_frame_is_skipped(end_s):
+    analysis = _sections(8.0, [0.0, 2.0, 4.0, 6.0], ("verse", 0, 4, 0.5), ("chorus", 4.0, end_s, 0.8))
+
+    plan = build_baseline_plan(analysis, SHOW, COLORS)
+
+    assert [p for p in plan if p["start_ms"] >= 4000] == []
+    assert validate_plan(plan, SHOW, analysis.duration_ms, XLIGHTS_EFFECT_NAMES).errors == []
+
+
+def test_a_downbeat_in_the_last_frame_gets_no_accent():
+    analysis = _sections(10.01, [0.0, 2.0, 4.0, 6.0, 8.0, 10.0], ("chorus", 0, 10.01, 0.8))
+
+    plan = build_baseline_plan(analysis, SHOW, COLORS)
+
+    assert [p["start_ms"] for p in plan if p["layer"] == 1] == [0, 2000, 4000, 6000, 8000]
+    assert validate_plan(plan, SHOW, analysis.duration_ms, XLIGHTS_EFFECT_NAMES).errors == []
+
+
+def test_a_show_without_feature_groups_gets_no_feature_or_accent_placements():
+    show = SHOW.model_copy(update={"model_groups": [g for g in SHOW.model_groups if g.name in {"All", "Everything Flat"}]})
+
+    plan = build_baseline_plan(ANALYSIS, show, COLORS)
+
+    assert {(p["element"], p["layer"]) for p in plan} == {("Everything Flat", 0)}
+    assert len(plan) == 3

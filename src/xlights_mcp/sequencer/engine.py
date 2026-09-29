@@ -27,6 +27,7 @@ from typing import Literal
 from xlights_mcp.audio.analyzer import ProgressCallback, SongAnalysis, StemAnalysis, full_analysis
 from xlights_mcp.audio.structure import SongSection
 from xlights_mcp.config import AudioConfig
+from xlights_mcp.sequencer.timing import last_frame_ms, to_frame
 from xlights_mcp.xlights.layout import build_show_layout, show_tiers
 from xlights_mcp.xlights.models import LightModel, ShowConfig
 from xlights_mcp.xlights.palettes import DEFAULT_PALETTE, get_theme_palettes
@@ -1043,12 +1044,13 @@ def build_baseline_plan(
     ))
     categories = _group_categories(show)
     palette = {"colors": colors}
+    song_end = last_frame_ms(analysis.duration_ms)
 
     plan: list[dict] = []
     feature_turn = accent_turn = 0
     for index, section in enumerate(analysis.sections):
         start, end = section.start_time_ms, section.end_time_ms
-        if end <= start:
+        if to_frame(end) <= to_frame(start):
             continue
         role = SECTION_ROLES.get(section.label, "features")
         if role == "wash":
@@ -1071,6 +1073,8 @@ def build_baseline_plan(
             for downbeat in analysis.beats.downbeat_times:
                 if pool and section.start_time <= downbeat < section.end_time:
                     at = round(downbeat * 1000)
+                    if to_frame(at) >= song_end:
+                        continue
                     plan.append(_placement(pool[accent_turn % len(pool)], 1, "On_solid", at, at + ACCENT_MS, palette))
                     accent_turn += 1
     return plan
