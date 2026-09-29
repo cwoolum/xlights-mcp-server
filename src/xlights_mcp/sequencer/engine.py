@@ -27,7 +27,7 @@ from xlights_mcp.audio.structure import SongSection
 from xlights_mcp.config import AudioConfig
 from xlights_mcp.xlights.layout import show_tiers
 from xlights_mcp.xlights.models import LightModel, ShowConfig
-from xlights_mcp.xlights.palettes import ColorPalette, get_theme_palettes
+from xlights_mcp.xlights.palettes import DEFAULT_PALETTE, get_theme_palettes
 from xlights_mcp.xlights.show import load_show_config
 from xlights_mcp.xlights.xsq_writer import (
     EffectPlacement, SequenceSpec, TimingTrack, TimingTrackLabel, write_xsq,
@@ -502,9 +502,8 @@ def _generate_auto(
     theme_palettes = get_theme_palettes(theme)
     palette_pool = list(theme_palettes.values())
     if not palette_pool:
-        palette_pool = [ColorPalette(colors=["#FFFFFF"], active_colors=[1])]
+        palette_pool = [DEFAULT_PALETTE]
 
-    all_palettes: list[ColorPalette] = list(palette_pool)
     all_effects: list[EffectPlacement] = []
 
     # Pre-compute beats within each section
@@ -850,7 +849,7 @@ def _generate_auto(
                     start_time_ms=0,
                     end_time_ms=analysis.duration_ms,
                     settings=faces_settings,
-                    palette=all_palettes[0] if all_palettes else ColorPalette(),
+                    palette=palette_pool[0],
                 ))
 
             logger.info(
@@ -895,7 +894,7 @@ def _generate_auto(
         "models_with_effects": len(models),
         "total_effects": len(all_effects),
         "layers_used": len(layers_used),
-        "unique_palettes": len(all_palettes),
+        "unique_palettes": len(palette_pool),
         "model_groups": len(groups),
         "has_lyrics": has_lyrics,
         "timing_tracks": [t.name for t in timing_tracks],
