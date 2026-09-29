@@ -868,7 +868,7 @@ def _generate_auto(
         song_title=mp3_path.stem, artist="", album="",
         media_file=str(mp3_path),
         duration_ms=analysis.duration_ms, timing_ms=25,
-        palettes=all_palettes, effects=all_effects,
+        effects=all_effects,
         timing_tracks=timing_tracks,
     )
 

@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from xlights_mcp.xlights.models import LightModel, ShowConfig
-from xlights_mcp.xlights.palettes import ColorPalette
+from xlights_mcp.xlights.palettes import DEFAULT_PALETTE, ColorPalette
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,6 @@ class SequenceSpec(BaseModel):
     media_file: str = ""
     duration_ms: int = 0
     timing_ms: int = 25  # frame rate in ms (25ms = 40fps)
-    palettes: list[ColorPalette] = Field(default_factory=list)
     effects: list[EffectPlacement] = Field(default_factory=list)
     timing_tracks: list[TimingTrack] = Field(default_factory=list)
 
@@ -102,18 +101,11 @@ def write_xsq(
 
     # <ColorPalettes>
     palettes_elem = ET.SubElement(root, "ColorPalettes")
-    palette_index_map: dict[int, int] = {}  # effect index → palette index
-
-    # Build unique palettes
-    palette_strings: list[str] = []
-    for palette in spec.palettes:
-        ps = palette.to_xlights_string()
-        if ps not in palette_strings:
-            palette_strings.append(ps)
-
-    for ps in palette_strings:
-        cp = ET.SubElement(palettes_elem, "ColorPalette")
-        cp.text = ps
+    palette_index: dict[str, int] = {}
+    for eff in spec.effects:
+        palette_index.setdefault(_palette_string(eff), len(palette_index))
+    for ps in palette_index:
+        ET.SubElement(palettes_elem, "ColorPalette").text = ps
 
     # <EffectDB> — deduplicated effect settings
     effect_db_elem = ET.SubElement(root, "EffectDB")
@@ -177,36 +169,19 @@ def write_xsq(
 
         model_effects = effects_by_model.get(name, [])
 
-        # Group by layer
         layers: dict[int, list[EffectPlacement]] = {}
         for eff in model_effects:
             layers.setdefault(eff.layer, []).append(eff)
 
-        # Always have at least one layer
-        if not layers:
-            ET.SubElement(ee, "EffectLayer")
-        else:
-            for layer_idx in sorted(layers.keys()):
-                layer_elem = ET.SubElement(ee, "EffectLayer")
-                for eff in sorted(layers[layer_idx], key=lambda e: e.start_time_ms):
-                    effect_elem = ET.SubElement(layer_elem, "Effect")
-                    effect_elem.set("name", eff.effect_name)
-                    effect_elem.set("startTime", str(eff.start_time_ms))
-                    effect_elem.set("endTime", str(eff.end_time_ms))
-
-                    # Reference into EffectDB
-                    settings_str = _build_effect_settings(eff)
-                    if settings_str in effect_settings_map:
-                        effect_elem.set("ref", str(effect_settings_map[settings_str]))
-
-                    # Reference palette
-                    if eff.palette:
-                        ps = eff.palette.to_xlights_string()
-                        try:
-                            pidx = palette_strings.index(ps)
-                            effect_elem.set("palette", str(pidx))
-                        except ValueError:
-                            pass
+        for layer_idx in range(max(layers, default=0) + 1):
+            layer_elem = ET.SubElement(ee, "EffectLayer")
+            for eff in sorted(layers.get(layer_idx, []), key=lambda e: e.start_time_ms):
+                effect_elem = ET.SubElement(layer_elem, "Effect")
+                effect_elem.set("name", eff.effect_name)
+                effect_elem.set("startTime", str(eff.start_time_ms))
+                effect_elem.set("endTime", str(eff.end_time_ms))
+                effect_elem.set("ref", str(effect_settings_map[_build_effect_settings(eff)]))
+                effect_elem.set("palette", str(palette_index[_palette_string(eff)]))
 
     # Add timing tracks to ElementEffects (phoneme labels)
     for track in spec.timing_tracks:
@@ -242,10 +217,11 @@ def write_xsq(
 
 def _build_effect_settings(eff: EffectPlacement) -> str:
     """Build the effect settings string for the EffectDB."""
-    parts = []
-    for key, val in sorted(eff.settings.items()):
-        parts.append(f"{key}={val}")
-    return ",".join(parts)
+    return ",".join(f"{key}={val}" for key, val in eff.settings.items())
+
+
+def _palette_string(eff: EffectPlacement) -> str:
+    return (eff.palette or DEFAULT_PALETTE).to_xlights_string()
 
 
 def _add_text_elem(parent: ET.Element, tag: str, text: str) -> ET.Element:
