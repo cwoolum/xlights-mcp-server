@@ -7,7 +7,8 @@ import logging
 import tempfile
 import threading
 import time
-from datetime import datetime, timezone
+import xml.etree.ElementTree as ET
+from datetime import UTC, datetime
 from pathlib import Path
 
 import anyio
@@ -297,7 +298,7 @@ def list_sequences() -> dict:
                 "name": xsq.stem,
                 "path": str(xsq),
                 "generated": is_generated_file(xsq),
-                "modified": datetime.fromtimestamp(xsq.stat().st_mtime, tz=timezone.utc)
+                "modified": datetime.fromtimestamp(xsq.stat().st_mtime, tz=UTC)
                 .astimezone()
                 .isoformat(timespec="seconds"),
             }
@@ -330,6 +331,39 @@ def inspect_sequence(sequence_name: str) -> dict:
         return {"error": f"Sequence not found: {xsq_path}"}
 
     return read_xsq_summary(xsq_path)
+
+
+@mcp.tool()
+def profile_sequence(xsq_path: str) -> dict:
+    """Style profile of a sequence, measured against the active show's layout.
+
+    Use a hand-made sequence as the target style for a new one:
+    - lit_at_once: elements lit at the same moment (median / p90 / max), sampled every 50 ms
+    - dark_share: share of the song with nothing lit ("Off" effects count as dark)
+    - parent_lit_with_contained: per group, the share of its lit time when a group or model
+      inside it is also lit (how often parents act as a base under their children)
+    - overlaps_within_layer: overlapping effects on one element layer (hand-made sequences have 0)
+    - elements: per element (the 20 busiest), its layers, effect count, median effect length,
+      share of the song lit and top effect names; other_elements summarises the rest
+
+    Args:
+        xsq_path: The sequence file; a name or relative path resolves against the active show
+            folder, and ".xsq" is added when missing
+    """
+    from xlights_mcp.xlights.profile import profile_sequence as build_profile
+    from xlights_mcp.xlights.show import load_show_config
+
+    config = get_config()
+    show_path = _active_show(config)
+    if isinstance(show_path, dict):
+        return show_path
+    path = _show_file(show_path, xsq_path, ".xsq")
+    if not path.exists():
+        return {"error": f"Sequence not found: {path}"}
+    try:
+        return build_profile(path, load_show_config(show_path))
+    except (ET.ParseError, ValueError) as e:
+        return {"error": f"Could not parse {path.name}: {e}"}
 
 
 @mcp.tool()

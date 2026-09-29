@@ -277,6 +277,7 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 | `list_controllers` | List controllers with IPs, protocols, and channel counts |
 | `list_sequences` | List all `.xsq` sequence files in the active show |
 | `inspect_sequence` | Show song info, duration, effects, and models used in a sequence |
+| `profile_sequence` | Style profile of a sequence against the show layout: elements lit at once, dark share, parents lit with their children, layers and effects per element — use a hand-made sequence as the target style |
 | `list_effects` | List all available xLights effects with descriptions |
 
 ### Audio Analysis
