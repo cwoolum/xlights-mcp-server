@@ -6,6 +6,42 @@ import re
 
 from pydantic import BaseModel, Field
 
+CURVE_SLOTS = 200
+MAX_BRIGHTNESS = 400
+_SNAP_WARNING_MS = 25
+
+
+def brightness_curve_points(
+    points_ms: list[tuple[float, float]], start_ms: float, end_ms: float
+) -> tuple[list[tuple[float, float]], list[str]]:
+    """Snap ``(t_ms, level)`` points to the ``CURVE_SLOTS`` slots across an effect, as ``(x, level)`` pairs with warnings."""
+    length = end_ms - start_ms
+    slot_ms = length / CURVE_SLOTS
+    by_slot: dict[int, float] = {}
+    snapped = merged = False
+    previous_t: float | None = None
+    previous_slot = 0
+    for t, level in points_ms:
+        slot = round((t - start_ms) / length * CURVE_SLOTS)
+        if abs(slot * slot_ms - (t - start_ms)) > _SNAP_WARNING_MS:
+            snapped = True
+        if t == previous_t:
+            slot = min(previous_slot + 1, CURVE_SLOTS)
+        if slot in by_slot:
+            merged = True
+        by_slot[slot] = level
+        previous_t, previous_slot = t, slot
+    by_slot.setdefault(0, by_slot[min(by_slot)])
+    by_slot.setdefault(CURVE_SLOTS, by_slot[max(by_slot)])
+    warnings = []
+    if snapped:
+        warnings.append(
+            f"brightness curve points snap to {slot_ms:.0f} ms steps on this {length / 1000:.1f} s effect"
+        )
+    if merged:
+        warnings.append(f"brightness points closer than one curve slot ({slot_ms:.0f} ms) were merged")
+    return [(slot / CURVE_SLOTS, by_slot[slot]) for slot in sorted(by_slot)], warnings
+
 
 class ColorPalette(BaseModel):
     """An xLights color palette for effects."""
@@ -16,6 +52,7 @@ class ColorPalette(BaseModel):
     sparkle_color: str = ""
     music_sparkles: bool = False
     brightness: int = 100
+    brightness_curve: list[tuple[float, float]] | None = None  # (x 0-1 across the effect, level 0-400)
 
     def to_xlights_string(self) -> str:
         """Serialize to the xLights palette format string."""
@@ -31,7 +68,13 @@ class ColorPalette(BaseModel):
         for idx in self.active_colors:
             parts.append(f"C_CHECKBOX_Palette{idx}=1")
 
-        if self.brightness != 100:
+        if self.brightness_curve:
+            values = ";".join(f"{x:.3f}:{level / MAX_BRIGHTNESS:.4f}" for x, level in self.brightness_curve)
+            parts.append(
+                "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|Type=Custom"
+                f"|Min=0.00|Max={MAX_BRIGHTNESS:.2f}|RV=TRUE|Values={values}|"
+            )
+        elif self.brightness != 100:
             parts.append(f"C_SLIDER_Brightness={self.brightness}")
 
         # Sparkle
