@@ -162,6 +162,7 @@ Hard errors abort the write; auto-fixes are applied and counted.
 | `element` is a submodel (`Model/Sub`) | error: submodel elements aren't supported yet; use a group |
 | `effect` not a known xLights effect name | error with close-name suggestions |
 | Malformed `settings` string or palette colour | error |
+| Unknown placement or palette key (e.g. a misspelt `pallete`), or a `settings` map value that isn't a string/number/boolean | error with close-name suggestions |
 | Parent group and a group/model it contains both have effects at the same moment | warning (counted, first 10 listed) |
 
 **Known effect names** live in `xlights/effects.py` as `XLIGHTS_EFFECT_NAMES`: a canonical list of xLights effect names (Off, On, Adjust, Bars, Butterfly, Candle, Circles, Color Wash, Curtain, DMX, Duplicate, Faces, Fan, Fill, Fire, Fireworks, Galaxy, Garlands, Glediator, Guitar, Kaleidoscope, Life, Lightning, Lines, Liquid, Marquee, Meteors, Morph, Moving Head, Music, Piano, Pictures, Pinwheel, Plasma, Ripple, Servo, Shader, Shape, Shimmer, Shockwave, SingleStrand, Sketch, Snowflakes, Snowstorm, Spirals, Spirograph, State, Strobe, Tendril, Text, Tree, Twinkle, Video, VU Meter, Warp, Wave) plus every effect name found in `.xsq` files in the show folder, so names from other xLights versions the user already uses are accepted. The effect library behind `list_effects` is reconciled with this list: its `Chase` entry (not a real xLights effect) becomes `SingleStrand`, and every name it advertises must pass the writer's check (tested).
