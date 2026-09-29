@@ -47,11 +47,10 @@ def write_plan(
 
     stem = _XSQ_SUFFIX.sub("", name) if name is not None else mp3_path.stem
     file_name = f"{stem}.xsq"
-    output: Path | None = show_path / file_name
-    name_error = _name_error(name, stem) if name is not None else None
+    name_error = _name_error(name, stem)
+    output = None if name_error else show_path / file_name
     if name_error:
         errors.append(name_error)
-        output = None
     elif output.exists() and not overwrite:
         errors.append(f"{file_name} already exists; pass overwrite=true to replace it")
 
@@ -82,7 +81,9 @@ def write_plan(
     return report
 
 
-def _name_error(name: str, stem: str) -> str | None:
+def _name_error(name: str | None, stem: str) -> str | None:
+    if name is None:
+        return None
     if not stem.strip(" .") or "/" in stem or "\\" in stem:
         return f"name must be a file name without folders, got {name!r}"
     bad = _INVALID_NAME_CHARS.search(stem)
