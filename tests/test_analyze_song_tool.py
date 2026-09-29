@@ -181,7 +181,7 @@ async def test_analyze_song_reports_stem_summary_and_provenance(
     assert payload["stems"]["drums"]["onsets"] == 32
     assert payload["sections"][0]["drums"] == "present"
     silences_ms = payload["stems"]["drums"]["silences_ms"]
-    assert silences_ms == [[7755, 12005]]
+    assert silences_ms == [[8000, 12000]]
     assert all(isinstance(v, int) for span in silences_ms for v in span)
 
 
@@ -227,6 +227,44 @@ async def test_get_stem_events_serves_windowed_onsets(click_track: Path, isolate
     )
 
     assert payload["events_ms"] == [1000, 1500, 2000, 2500]
+
+
+async def test_get_stem_events_serves_kicks(click_track: Path, isolated_config: ServerConfig):
+    _cache_fake_analysis(click_track, isolated_config)
+
+    payload, _ = await _call(
+        "get_stem_events",
+        {"mp3_path": str(click_track), "stem": "drums", "kind": "kicks", "start_ms": 7000, "end_ms": 13000},
+    )
+
+    assert payload["events_ms"] == [7000, 7500, 12000, 12500]
+
+
+async def test_get_stem_events_accepts_the_instruments_alias(
+    click_track: Path, isolated_config: ServerConfig
+):
+    _cache_fake_analysis(click_track, isolated_config)
+
+    payload, _ = await _call(
+        "get_stem_events", {"mp3_path": str(click_track), "stem": "Instruments", "kind": "onsets"}
+    )
+
+    assert payload["error"] == "Stem 'other' was not analyzed for this song. Available: drums"
+
+
+async def test_get_stem_events_passes_min_ms_and_merge_gap_ms(
+    click_track: Path, isolated_config: ServerConfig
+):
+    _cache_fake_analysis(click_track, isolated_config)
+    args = {"mp3_path": str(click_track), "stem": "drums", "kind": "silences"}
+
+    default, _ = await _call("get_stem_events", args)
+    long_only, _ = await _call("get_stem_events", {**args, "min_ms": 5000})
+    negative, _ = await _call("get_stem_events", {**args, "merge_gap_ms": -1})
+
+    assert default["spans_ms"] == [[8000, 12000]]
+    assert long_only["spans_ms"] == []
+    assert negative["error"] == "merge_gap_ms must be >= 0"
 
 
 async def test_get_stem_events_rejects_bad_kind_before_analysing(
