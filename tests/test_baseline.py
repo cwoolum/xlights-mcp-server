@@ -10,12 +10,12 @@ from xlights_mcp.audio.sections import SongSection
 from xlights_mcp.sequencer.engine import (
     ACCENT_MS,
     BED_EFFECTS,
-    EFFECT_VARIANTS,
+    EFFECT_PRESETS,
     FACE_BED_KEYS,
     MOTION_EFFECTS,
     WASH_BRIGHTNESS,
-    _effect_name_from_key,
     _face_placements,
+    _placement,
     build_baseline_plan,
 )
 from xlights_mcp.sequencer.plan import validate_plan
@@ -108,7 +108,13 @@ def test_groups_holding_excluded_models_are_left_out():
 def test_every_table_key_is_a_known_xlights_effect():
     keys = {k for table in (BED_EFFECTS, MOTION_EFFECTS) for ks in table.values() for k in ks}
     keys |= {"ColorWash_slow", "On_solid", "Twinkle_dense", *FACE_BED_KEYS}
-    assert {_effect_name_from_key(k) for k in keys} <= XLIGHTS_EFFECT_NAMES
+    assert keys <= set(EFFECT_PRESETS)
+    assert {effect for effect, _ in EFFECT_PRESETS.values()} <= XLIGHTS_EFFECT_NAMES
+
+
+def test_an_unknown_preset_key_is_an_error():
+    with pytest.raises(KeyError):
+        _placement("Door", 0, "Shockwave_hit", 0, 1000, {"colors": COLORS})
 
 
 def test_accent_exclusions_skip_those_props_but_keep_their_groups():
@@ -185,8 +191,8 @@ def test_a_show_without_feature_groups_gets_no_feature_or_accent_placements():
 
 
 def test_chase_variants_use_the_textctrl_rotations_key():
-    chases = [v for key, variants in EFFECT_VARIANTS.items() if key.startswith("Chase_") for v in variants]
+    chases = [settings for key, (_, settings) in EFFECT_PRESETS.items() if key.startswith("Chase_")]
 
     assert len(chases) == 4
-    assert all(v["E_TEXTCTRL_Chase_Rotations"] == "1.0" for v in chases)
-    assert not any("E_SLIDER_Chase_Rotations" in v for variants in EFFECT_VARIANTS.values() for v in variants)
+    assert all(s["E_TEXTCTRL_Chase_Rotations"] == "1.0" for s in chases)
+    assert not any("E_SLIDER_Chase_Rotations" in s for _, s in EFFECT_PRESETS.values())

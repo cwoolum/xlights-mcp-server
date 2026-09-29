@@ -12,7 +12,7 @@ from xlights_mcp.audio.lyrics import LyricTrack
 from xlights_mcp.audio.sections import SongSection
 from xlights_mcp.config import AudioConfig
 from xlights_mcp.sequencer.plan_writer import write_plan
-from xlights_mcp.sequencer.timing import last_frame_ms, to_frame
+from xlights_mcp.sequencer.timing import STEM_TRACK_NAMES, last_frame_ms, to_frame
 from xlights_mcp.xlights.layout import build_show_layout
 from xlights_mcp.xlights.models import ShowConfig
 from xlights_mcp.xlights.palettes import palette_colors
@@ -22,114 +22,131 @@ from xlights_mcp.xlights.xsq_writer import TimingTrack, TimingTrackLabel
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Professional effect settings — extracted from real human-made sequences
-# Multiple variants per effect type for variety
+# Effect presets: key → (xLights effect name, settings from real human-made sequences)
 # ---------------------------------------------------------------------------
 
-EFFECT_VARIANTS: dict[str, list[dict[str, str]]] = {
-    "Chase_left": [
+EFFECT_PRESETS: dict[str, tuple[str, dict[str, str]]] = {
+    "Chase_left": (
+        "SingleStrand",
         {"B_CHOICE_BufferStyle": "Per Model Single Line", "E_CHECKBOX_Chase_Group_All": "0",
          "E_CHOICE_Chase_Type1": "Left-Right", "E_CHOICE_Fade_Type": "None",
          "E_CHOICE_SingleStrand_Colors": "Palette", "E_NOTEBOOK_SSEFFECT_TYPE": "Chase",
          "E_SLIDER_Color_Mix1": "36", "E_SLIDER_Number_Chases": "1",
          "E_TEXTCTRL_Chase_Rotations": "1.0"},
-    ],
-    "Chase_right": [
+    ),
+    "Chase_right": (
+        "SingleStrand",
         {"B_CHOICE_BufferStyle": "Per Model Single Line", "E_CHECKBOX_Chase_Group_All": "0",
          "E_CHOICE_Chase_Type1": "Right-Left", "E_CHOICE_Fade_Type": "None",
          "E_CHOICE_SingleStrand_Colors": "Palette", "E_NOTEBOOK_SSEFFECT_TYPE": "Chase",
          "E_SLIDER_Color_Mix1": "36", "E_SLIDER_Number_Chases": "1",
          "E_TEXTCTRL_Chase_Rotations": "1.0"},
-    ],
-    "Chase_from_middle": [
+    ),
+    "Chase_from_middle": (
+        "SingleStrand",
         {"B_CHOICE_BufferStyle": "Per Model Single Line", "E_CHECKBOX_Chase_Group_All": "0",
          "E_CHOICE_Chase_Type1": "From Middle", "E_CHOICE_Fade_Type": "None",
          "E_CHOICE_SingleStrand_Colors": "Palette", "E_NOTEBOOK_SSEFFECT_TYPE": "Chase",
          "E_SLIDER_Color_Mix1": "36", "E_SLIDER_Number_Chases": "1",
          "E_TEXTCTRL_Chase_Rotations": "1.0"},
-    ],
-    "Chase_bounce": [
+    ),
+    "Chase_bounce": (
+        "SingleStrand",
         {"B_CHOICE_BufferStyle": "Per Model Single Line", "E_CHECKBOX_Chase_Group_All": "0",
          "E_CHOICE_Chase_Type1": "Bounce from Left", "E_CHOICE_Fade_Type": "None",
          "E_CHOICE_SingleStrand_Colors": "Palette", "E_NOTEBOOK_SSEFFECT_TYPE": "Chase",
          "E_SLIDER_Color_Mix1": "36", "E_SLIDER_Number_Chases": "1",
          "E_TEXTCTRL_Chase_Rotations": "1.0"},
-    ],
-    "Twinkle_ambient": [
+    ),
+    "Twinkle_ambient": (
+        "Twinkle",
         {"E_CHECKBOX_Twinkle_ReRandom": "0", "E_CHECKBOX_Twinkle_Strobe": "0",
          "E_CHOICE_Twinkle_Style": "New Render Method",
          "E_SLIDER_Twinkle_Count": "3", "E_SLIDER_Twinkle_Steps": "14",
          "T_TEXTCTRL_Fadein": "0.5", "T_TEXTCTRL_Fadeout": "1.0"},
-    ],
-    "Twinkle_dense": [
+    ),
+    "Twinkle_dense": (
+        "Twinkle",
         {"E_CHECKBOX_Twinkle_ReRandom": "0", "E_CHECKBOX_Twinkle_Strobe": "0",
          "E_CHOICE_Twinkle_Style": "New Render Method",
          "E_SLIDER_Twinkle_Count": "36", "E_SLIDER_Twinkle_Steps": "10",
          "T_TEXTCTRL_Fadein": "0.2", "T_TEXTCTRL_Fadeout": "0.5"},
-    ],
-    "ColorWash_slow": [
+    ),
+    "ColorWash_slow": (
+        "Color Wash",
         {"E_CHECKBOX_ColorWash_CircularPalette": "1", "E_TEXTCTRL_ColorWash_Cycles": "1",
          "T_TEXTCTRL_Fadein": "1.0", "T_TEXTCTRL_Fadeout": "1.0"},
-    ],
-    "ColorWash_fast": [
+    ),
+    "ColorWash_fast": (
+        "Color Wash",
         {"E_CHECKBOX_ColorWash_CircularPalette": "1", "E_TEXTCTRL_ColorWash_Cycles": "3"},
-    ],
-    "ColorWash_cycling": [
+    ),
+    "ColorWash_cycling": (
+        "Color Wash",
         {"E_CHECKBOX_ColorWash_CircularPalette": "1", "E_TEXTCTRL_ColorWash_Cycles": "20.0",
          "T_TEXTCTRL_Fadein": "2.5"},
-    ],
-    "Plasma_slow": [
+    ),
+    "Plasma_slow": (
+        "Plasma",
         {"E_CHOICE_Plasma_Color": "Normal", "E_SLIDER_Plasma_Line_Density": "1",
          "E_SLIDER_Plasma_Speed": "10", "E_SLIDER_Plasma_Style": "10",
          "T_TEXTCTRL_Fadein": "0.5", "T_TEXTCTRL_Fadeout": "0.5"},
-    ],
-    "Plasma_fast": [
+    ),
+    "Plasma_fast": (
+        "Plasma",
         {"E_CHOICE_Plasma_Color": "Normal", "E_SLIDER_Plasma_Line_Density": "1",
          "E_SLIDER_Plasma_Speed": "80", "E_SLIDER_Plasma_Style": "10",
          "T_TEXTCTRL_Fadein": "0.25", "T_TEXTCTRL_Fadeout": "0.25"},
-    ],
-    "Spirals_slow": [
+    ),
+    "Spirals_slow": (
+        "Spirals",
         {"E_CHECKBOX_Spirals_3D": "1", "E_CHECKBOX_Spirals_Blend": "0",
          "E_CHECKBOX_Spirals_Grow": "0", "E_CHECKBOX_Spirals_Shrink": "0",
          "E_SLIDER_Spirals_Count": "1", "E_SLIDER_Spirals_Rotation": "20",
          "E_SLIDER_Spirals_Thickness": "50", "E_TEXTCTRL_Spirals_Movement": "1.0",
          "T_TEXTCTRL_Fadein": "0.5", "T_TEXTCTRL_Fadeout": "0.5"},
-    ],
-    "Spirals_fast": [
+    ),
+    "Spirals_fast": (
+        "Spirals",
         {"E_CHECKBOX_Spirals_3D": "1", "E_CHECKBOX_Spirals_Blend": "0",
          "E_CHECKBOX_Spirals_Grow": "0", "E_CHECKBOX_Spirals_Shrink": "0",
          "E_SLIDER_Spirals_Count": "5", "E_SLIDER_Spirals_Rotation": "20",
          "E_SLIDER_Spirals_Thickness": "18", "E_TEXTCTRL_Spirals_Movement": "3.0"},
-    ],
-    "Spirals_reverse": [
+    ),
+    "Spirals_reverse": (
+        "Spirals",
         {"E_CHECKBOX_Spirals_3D": "1", "E_CHECKBOX_Spirals_Blend": "0",
          "E_CHECKBOX_Spirals_Grow": "0", "E_CHECKBOX_Spirals_Shrink": "0",
          "E_SLIDER_Spirals_Count": "1", "E_SLIDER_Spirals_Rotation": "-20",
          "E_SLIDER_Spirals_Thickness": "50", "E_TEXTCTRL_Spirals_Movement": "-1.0"},
-    ],
-    "Meteors_rain": [
+    ),
+    "Meteors_rain": (
+        "Meteors",
         {"E_CHECKBOX_Meteors_UseMusic": "0", "E_CHOICE_Meteors_Effect": "Down",
          "E_CHOICE_Meteors_Type": "Palette", "E_SLIDER_Meteors_Count": "10",
          "E_SLIDER_Meteors_Length": "25", "E_SLIDER_Meteors_Speed": "15",
          "E_SLIDER_Meteors_Swirl_Intensity": "0"},
-    ],
-    "Pinwheel_sweep": [
+    ),
+    "Pinwheel_sweep": (
+        "Pinwheel",
         {"E_CHECKBOX_Pinwheel_Rotation": "1", "E_CHOICE_Pinwheel_3D": "Sweep",
          "E_CHOICE_Pinwheel_Style": "New Render Method",
          "E_SLIDER_Pinwheel_ArmSize": "150", "E_SLIDER_Pinwheel_Arms": "10",
          "E_SLIDER_Pinwheel_Speed": "5", "E_SLIDER_Pinwheel_Twist": "60"},
-    ],
-    "Butterfly_gentle": [
+    ),
+    "Butterfly_gentle": (
+        "Butterfly",
         {"E_CHOICE_Butterfly_Colors": "Palette", "E_CHOICE_Butterfly_Direction": "Normal",
          "E_SLIDER_Butterfly_Chunks": "1", "E_SLIDER_Butterfly_Skip": "2",
          "E_SLIDER_Butterfly_Speed": "10", "E_SLIDER_Butterfly_Style": "1",
          "T_TEXTCTRL_Fadein": "0.25", "T_TEXTCTRL_Fadeout": "0.25"},
-    ],
-    "Marquee_default": [
+    ),
+    "Marquee_default": (
+        "Marquee",
         {"E_SLIDER_Marquee_Band_Size": "3", "E_SLIDER_Marquee_Skip_Size": "3",
          "E_SLIDER_Marquee_Speed": "3", "E_SLIDER_Marquee_Stagger": "0"},
-    ],
-    "On_solid": [{}],
+    ),
+    "On_solid": ("On", {}),
 }
 
 
@@ -159,7 +176,6 @@ MOTION_EFFECTS: dict[str, list[str]] = {
     "other": ["Chase_from_middle", "ColorWash_fast"],
 }
 
-# Section energy thresholds
 HIGH_ENERGY_THRESHOLD = 0.65
 LOW_ENERGY_THRESHOLD = 0.35
 
@@ -175,7 +191,6 @@ SECTION_TYPE_CONFIG: dict[str, SectionRole] = {
 ACCENT_MS = 100
 WASH_BRIGHTNESS = 40
 FACE_BED_KEYS = ("Twinkle_ambient", "ColorWash_cycling", "Butterfly_gentle")
-STEM_TIMING_TRACKS = ("Drums", "Bass", "Instruments")
 
 
 def generate_sequence(
@@ -369,7 +384,7 @@ def _generate_auto(
     lyric_tracks: list[TimingTrack] = []
     assignments: dict[str, str] = {}
     elements = show_config.element_names
-    stems = STEM_TIMING_TRACKS if analysis.stem_analysis.available else ()
+    stems = STEM_TRACK_NAMES if analysis.stem_analysis.available else ()
     named_tracks = []
     for name in ("Beats", "Bars", *stems):
         if name in elements:
@@ -495,41 +510,6 @@ def _generate_guided_preview(analysis: SongAnalysis, show_config: ShowConfig) ->
 # ---------------------------------------------------------------------------
 
 
-def _get_settings(variant_key: str) -> dict[str, str]:
-    """Get effect settings for a named variant."""
-    variants = EFFECT_VARIANTS.get(variant_key, [{}])
-    return variants[0].copy() if variants else {}
-
-
-def _effect_name_from_key(variant_key: str) -> str:
-    """Extract the xLights effect name from a variant key.
-
-    e.g. 'Chase_left' → 'SingleStrand', 'Spirals_fast' → 'Spirals'
-    """
-    key_to_effect = {
-        "Chase_left": "SingleStrand",
-        "Chase_right": "SingleStrand",
-        "Chase_from_middle": "SingleStrand",
-        "Chase_bounce": "SingleStrand",
-        "Twinkle_ambient": "Twinkle",
-        "Twinkle_dense": "Twinkle",
-        "ColorWash_slow": "Color Wash",
-        "ColorWash_fast": "Color Wash",
-        "ColorWash_cycling": "Color Wash",
-        "Plasma_slow": "Plasma",
-        "Plasma_fast": "Plasma",
-        "Spirals_slow": "Spirals",
-        "Spirals_fast": "Spirals",
-        "Spirals_reverse": "Spirals",
-        "Meteors_rain": "Meteors",
-        "Pinwheel_sweep": "Pinwheel",
-        "Butterfly_gentle": "Butterfly",
-        "Marquee_default": "Marquee",
-        "On_solid": "On",
-    }
-    return key_to_effect.get(variant_key, variant_key.split("_")[0])
-
-
 def _height_order(row: dict) -> tuple:
     y_range = row["y_range"]
     return (y_range[0], y_range[1], row["name"]) if y_range else (float("inf"), float("inf"), row["name"])
@@ -551,9 +531,10 @@ def _section_span(section: SongSection, song_end: int) -> tuple[int, int] | None
 
 
 def _placement(element: str, layer: int, key: str, start_ms: int, end_ms: int, palette: dict) -> dict:
+    effect, settings = EFFECT_PRESETS[key]
     return {
-        "element": element, "layer": layer, "effect": _effect_name_from_key(key),
-        "start_ms": start_ms, "end_ms": end_ms, "settings": _get_settings(key), "palette": palette,
+        "element": element, "layer": layer, "effect": effect,
+        "start_ms": start_ms, "end_ms": end_ms, "settings": dict(settings), "palette": palette,
     }
 
 

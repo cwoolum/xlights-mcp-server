@@ -10,7 +10,8 @@ from xlights_mcp.audio.drums import BEATS_PER_BAR
 from xlights_mcp.xlights.xsq_writer import FRAME_MS, TimingTrack, TimingTrackLabel
 
 _STEM_TRACKS = {"Drums": "drums", "Bass": "bass", "Instruments": "other"}
-TIMING_TRACK_NAMES = ("Beats", "Bars", *_STEM_TRACKS)
+STEM_TRACK_NAMES = tuple(_STEM_TRACKS)
+TIMING_TRACK_NAMES = ("Beats", "Bars", *STEM_TRACK_NAMES)
 _DOWNBEAT_TOLERANCE_S = 0.05
 
 
