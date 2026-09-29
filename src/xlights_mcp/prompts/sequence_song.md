@@ -10,7 +10,7 @@ Call `analyze_song` with `mp3_path` = `{{mp3_path}}`. Note:
 - whether drums are present in each section;
 - whether stems are available (`stems` is not null).
 
-For exact beat and downbeat times, use `get_beat_map`. For drum and bass hits worth accenting, use `get_stem_events`: time dropouts from `get_stem_events(kind="silences")` (add `merge_gap_ms` to join dropouts split by a stray hit) and time hits from `kind="kicks"` (drums).
+For exact beat and downbeat times, use `get_beat_map`. For hits worth accenting, use `get_stem_events(stem="drums", kind="kicks")`, or `kind="onsets"` for any stem. For dropouts, use `get_stem_events(stem=..., kind="silences")` on any stem; add `merge_gap_ms` to join dropouts split by a stray hit.
 
 ## 2. Understand the show
 
