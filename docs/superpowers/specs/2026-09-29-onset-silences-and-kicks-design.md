@@ -53,6 +53,7 @@ The spans are computed over the whole song from the cached `onset_times`, the st
 - The end is the first energy frame at or after `e` where energy is at least `2 × SILENCE_THRESHOLD` (0.1). The stem has to be clearly back, which a faint rumble isn't.
   - If a hit lies within 0.1 s of that frame, the end snaps to the nearest such hit.
   - If energy never reaches 0.1, the end is the duration.
+  - There's no cap on how far the end can move. A quiet-but-present stretch (energy 0.05–0.1) counts as silent however long it lasts, and can join the next stored silence. On Ghosts, vocals run silent across 153.3–169.2 s, which matches the track.
 - Hits inside `[s, e)` don't split or shorten the span.
 - Ends can move a little earlier, by at most 0.1 s, when they snap to a hit.
 - Their measured results on Ghosts:
@@ -61,7 +62,7 @@ The spans are computed over the whole song from the cached `onset_times`, the st
   |---|---|
   | bridge bass (was 123.62) | 125.272, the bass's return hit |
   | intro bass | 7.709 |
-  | `other` spans | stay within about 0.2 s of their stored ends |
+  | `other` spans | stay within 0.3 s of their stored ends |
 
 **Then, for every stem:**
 1. Clamp each span to `[0, duration]`.
@@ -106,7 +107,7 @@ On Ghosts, the defaults give 5 drum spans: [0, 7.036), [51.710, 65.945), [110.54
 - The existing check against model and group names applies.
 
 **`create_sequence`:**
-- `STEM_TIMING_TRACKS` now includes `Kicks`, so the baseline asks for it whenever stems are available.
+- `Kicks` joins `STEM_TRACK_NAMES`, which the baseline already requests whenever stems are available.
 - Each downbeat accent starts at the nearest kick within 100 ms of the downbeat, or at the downbeat itself when there's none, and is then frame-rounded.
 - When `kicks()` raises, accents stay on downbeats with no warning. The Kicks track's own warning already says so.
 - The existing "not in the last frame" guard still applies.
@@ -127,6 +128,7 @@ On Ghosts, the defaults give 5 drum spans: [0, 7.036), [51.710, 65.945), [110.54
   - the end moves to the hit where energy returns above 0.1 (the rumble case);
   - a held note right after a silence, with no hit and energy above 0.1, keeps the stored end (the intro-bass case);
   - energy that never returns runs the span to the duration;
+  - two stored silences joined by a quiet 0.05–0.1 stretch become one span;
   - hits inside a span don't split it;
   - the start is unchanged.
 - **`min_ms` and `merge_gap_ms`:**
