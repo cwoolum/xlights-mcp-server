@@ -102,25 +102,25 @@ def write_xsq(
     # <Jukebox>
     ET.SubElement(root, "Jukebox")
 
+    default_palette = DEFAULT_PALETTE.to_xlights_string()
+    palette_index: dict[str, int] = {}
+    settings_index: dict[str, int] = {}
+    effects_by_model: dict[str, list[tuple[EffectPlacement, int, int]]] = {}
+    for eff in spec.effects:
+        ref = settings_index.setdefault(_build_effect_settings(eff), len(settings_index))
+        palette_str = eff.palette.to_xlights_string() if eff.palette else default_palette
+        palette = palette_index.setdefault(palette_str, len(palette_index))
+        effects_by_model.setdefault(eff.model_name, []).append((eff, ref, palette))
+
     # <ColorPalettes>
     palettes_elem = ET.SubElement(root, "ColorPalettes")
-    palette_index: dict[str, int] = {}
-    for eff in spec.effects:
-        palette_index.setdefault(_palette_string(eff), len(palette_index))
     for ps in palette_index:
         ET.SubElement(palettes_elem, "ColorPalette").text = ps
 
     # <EffectDB> — deduplicated effect settings
     effect_db_elem = ET.SubElement(root, "EffectDB")
-    effect_settings_map: dict[str, int] = {}  # settings string → index
-
-    for eff in spec.effects:
-        settings_str = _build_effect_settings(eff)
-        if settings_str not in effect_settings_map:
-            idx = len(effect_settings_map)
-            effect_settings_map[settings_str] = idx
-            e = ET.SubElement(effect_db_elem, "Effect")
-            e.text = settings_str
+    for settings_str in settings_index:
+        ET.SubElement(effect_db_elem, "Effect").text = settings_str
 
     # <DataLayers>
     data_layers = ET.SubElement(root, "DataLayers")
@@ -131,14 +131,8 @@ def write_xsq(
     # <DisplayElements> — list all models in the sequencer
     display_elems = ET.SubElement(root, "DisplayElements")
 
-    # Collect unique model names from effects
-    models_used = set()
-    for eff in spec.effects:
-        models_used.add(eff.model_name)
-
     # Add all show models (even ones without effects, matching xLights behavior)
-    all_model_names = {m.name for m in show_config.models}
-    all_names = sorted(all_model_names | models_used)
+    all_names = sorted({m.name for m in show_config.models} | effects_by_model.keys())
 
     # Timing tracks (lyric tracks, etc.) come first, as in hand-made sequences
     for track in spec.timing_tracks:
@@ -161,11 +155,6 @@ def write_xsq(
     # <ElementEffects> — actual effect placements per model
     element_effects = ET.SubElement(root, "ElementEffects")
 
-    # Group effects by model
-    effects_by_model: dict[str, list[EffectPlacement]] = {}
-    for eff in spec.effects:
-        effects_by_model.setdefault(eff.model_name, []).append(eff)
-
     for track in spec.timing_tracks:
         te = ET.SubElement(element_effects, "Element")
         te.set("type", "timing")
@@ -184,21 +173,19 @@ def write_xsq(
         ee.set("type", "model")
         ee.set("name", name)
 
-        model_effects = effects_by_model.get(name, [])
-
-        layers: dict[int, list[EffectPlacement]] = {}
-        for eff in model_effects:
-            layers.setdefault(eff.layer, []).append(eff)
+        layers: dict[int, list[tuple[EffectPlacement, int, int]]] = {}
+        for entry in effects_by_model.get(name, []):
+            layers.setdefault(entry[0].layer, []).append(entry)
 
         for layer_idx in range(max(layers, default=0) + 1):
             layer_elem = ET.SubElement(ee, "EffectLayer")
-            for eff in sorted(layers.get(layer_idx, []), key=lambda e: e.start_time_ms):
+            for eff, ref, palette in sorted(layers.get(layer_idx, []), key=lambda e: e[0].start_time_ms):
                 effect_elem = ET.SubElement(layer_elem, "Effect")
                 effect_elem.set("name", eff.effect_name)
                 effect_elem.set("startTime", str(eff.start_time_ms))
                 effect_elem.set("endTime", str(eff.end_time_ms))
-                effect_elem.set("ref", str(effect_settings_map[_build_effect_settings(eff)]))
-                effect_elem.set("palette", str(palette_index[_palette_string(eff)]))
+                effect_elem.set("ref", str(ref))
+                effect_elem.set("palette", str(palette))
 
     # <lastView>
     _add_text_elem(root, "lastView", "0")
@@ -225,10 +212,6 @@ def is_generated_sequence(head: bytes) -> bool:
 def _build_effect_settings(eff: EffectPlacement) -> str:
     """Build the effect settings string for the EffectDB."""
     return ",".join(f"{key}={val}" for key, val in eff.settings.items())
-
-
-def _palette_string(eff: EffectPlacement) -> str:
-    return (eff.palette or DEFAULT_PALETTE).to_xlights_string()
 
 
 def _add_text_elem(parent: ET.Element, tag: str, text: str) -> ET.Element:
