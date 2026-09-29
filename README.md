@@ -287,13 +287,13 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 | `get_song_structure` | Detect song sections — verse/chorus/bridge, or intro/build/drop/breakdown/outro for tracks with a structural drum gap; sections carry `drums` (present/absent/decaying) when a drum stem was analyzed |
 | `get_beat_map` | Get beat timestamps, downbeats, tempo, and onsets — includes `beat_source` (madmom/librosa) and `drum_aligned` |
 | `get_energy_profile` | Get loudness curve and bass/mid/high frequency band energy |
-| `get_stem_events` | Per-stem onsets, energy (per beat or bar), or silences from source separation, windowed and paged |
+| `get_stem_events` | Per-stem onsets, kicks (drum hits with a kick's low end), energy (per beat or bar), or silences from source separation, windowed and paged; silences are bounded by audible hits, so a drum silence starts when the hits stop |
 
 ### Sequence Generation
 | Tool | Description |
 |------|-------------|
 | `create_sequence` | Generate a baseline `.xsq` from an `.mp3`: wash in quiet sections, feature groups taking turns, accents on downbeats (use the `sequence_song` prompt for hand-made-style sequences) |
-| `write_sequence` | Validate an effect plan (element, layer 0–2 where layer 0 draws on top, effect, times, settings, palette, optional blend mode) against the show and song, then write it as an `.xsq`, with optional Beats/Bars/stem timing tracks; `validate_only` returns the report without writing |
+| `write_sequence` | Validate an effect plan (element, layer 0–2 where layer 0 draws on top, effect, times, settings, palette, optional blend mode) against the show and song, then write it as an `.xsq`, with optional Beats/Bars/stem timing tracks (including Kicks); `validate_only` returns the report without writing |
 | `preview_plan` | Preview the generation plan without writing a file |
 
 ### Sequence Import & Remapping

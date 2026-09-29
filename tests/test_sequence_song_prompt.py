@@ -39,7 +39,17 @@ def test_an_existing_sequence_gets_a_new_name_unless_the_user_agreed_to_replace_
 
 
 def test_accents_follow_drum_onsets():
-    assert "drum onsets" in DEFAULT_TEXT and "kick" not in DEFAULT_TEXT
+    assert "drum onsets" in DEFAULT_TEXT
+
+
+def test_dropouts_come_from_silences_and_hits_from_kicks():
+    assert '`get_stem_events(kind="silences")`' in DEFAULT_TEXT
+    assert "`merge_gap_ms`" in DEFAULT_TEXT
+    assert '`kind="kicks"`' in DEFAULT_TEXT
+
+
+def test_the_kicks_timing_track_is_requested_when_stems_are_available():
+    assert 'timing_tracks: ["Beats", "Bars"]`. Add `"Kicks"`' in DEFAULT_TEXT
 
 
 def test_show_notes_are_embedded():

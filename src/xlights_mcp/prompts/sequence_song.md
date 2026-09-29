@@ -10,7 +10,7 @@ Call `analyze_song` with `mp3_path` = `{{mp3_path}}`. Note:
 - whether drums are present in each section;
 - whether stems are available (`stems` is not null).
 
-For exact beat and downbeat times, use `get_beat_map`. For drum and bass hits worth accenting, use `get_stem_events`.
+For exact beat and downbeat times, use `get_beat_map`. For drum and bass hits worth accenting, use `get_stem_events`: time dropouts from `get_stem_events(kind="silences")` (add `merge_gap_ms` to join dropouts split by a stray hit) and time hits from `kind="kicks"` (drums).
 
 ## 2. Understand the show
 
@@ -65,7 +65,7 @@ For a long plan, write the placements to a JSON file in the show folder and pass
 
 ## 5. Validate, then write
 
-1. Call `write_sequence` with `mp3_path` = `{{mp3_path}}`, your plan, and `timing_tracks: ["Beats", "Bars"]`. Add `"Drums"` when stems are available. Set `validate_only: true`.
+1. Call `write_sequence` with `mp3_path` = `{{mp3_path}}`, your plan, and `timing_tracks: ["Beats", "Bars"]`. Add `"Kicks"` (and `"Drums"` if you want every drum hit) when stems are available. Set `validate_only: true`.
 2. Fix every error it reports and call again until there are none. Read the warnings.
 3. Call it once more without `validate_only`. If `<song>.xsq` already exists, pass a new `name`, or `overwrite: true` only if the user agreed to replace it.
 4. Report the file path, the effect count, and any warnings you chose to keep.
