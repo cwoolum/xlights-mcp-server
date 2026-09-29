@@ -137,20 +137,21 @@ def write_xsq(
     all_model_names = {m.name for m in show_config.models}
     all_names = sorted(all_model_names | models_used)
 
-    for name in all_names:
-        de = ET.SubElement(display_elems, "Element")
-        de.set("collapsed", "0")
-        de.set("type", "model")
-        de.set("name", name)
-        de.set("visible", "1")
-        de.set("active", "0")
-
-    # Add timing tracks (lyric tracks, etc.) to DisplayElements
+    # Timing tracks (lyric tracks, etc.) come first, as in hand-made sequences
     for track in spec.timing_tracks:
         de = ET.SubElement(display_elems, "Element")
         de.set("collapsed", "0")
         de.set("type", "timing")
         de.set("name", track.name)
+        de.set("visible", "1")
+        de.set("views", "")
+        de.set("active", "0")
+
+    for name in all_names:
+        de = ET.SubElement(display_elems, "Element")
+        de.set("collapsed", "0")
+        de.set("type", "model")
+        de.set("name", name)
         de.set("visible", "1")
         de.set("active", "0")
 
@@ -161,6 +162,19 @@ def write_xsq(
     effects_by_model: dict[str, list[EffectPlacement]] = {}
     for eff in spec.effects:
         effects_by_model.setdefault(eff.model_name, []).append(eff)
+
+    for track in spec.timing_tracks:
+        te = ET.SubElement(element_effects, "Element")
+        te.set("type", "timing")
+        te.set("name", track.name)
+
+        for layer_labels in track.labels:
+            layer_elem = ET.SubElement(te, "EffectLayer")
+            for lbl in sorted(layer_labels, key=lambda l: l.start_time_ms):
+                label_elem = ET.SubElement(layer_elem, "Effect")
+                label_elem.set("label", lbl.label)
+                label_elem.set("startTime", str(lbl.start_time_ms))
+                label_elem.set("endTime", str(lbl.end_time_ms))
 
     for name in all_names:
         ee = ET.SubElement(element_effects, "Element")
@@ -182,20 +196,6 @@ def write_xsq(
                 effect_elem.set("endTime", str(eff.end_time_ms))
                 effect_elem.set("ref", str(effect_settings_map[_build_effect_settings(eff)]))
                 effect_elem.set("palette", str(palette_index[_palette_string(eff)]))
-
-    # Add timing tracks to ElementEffects (phoneme labels)
-    for track in spec.timing_tracks:
-        te = ET.SubElement(element_effects, "Element")
-        te.set("type", "timing")
-        te.set("name", track.name)
-
-        for layer_labels in track.labels:
-            layer_elem = ET.SubElement(te, "EffectLayer")
-            for lbl in sorted(layer_labels, key=lambda l: l.start_time_ms):
-                label_elem = ET.SubElement(layer_elem, "Effect")
-                label_elem.set("label", lbl.label)
-                label_elem.set("startTime", str(lbl.start_time_ms))
-                label_elem.set("endTime", str(lbl.end_time_ms))
 
     # <lastView>
     _add_text_elem(root, "lastView", "0")

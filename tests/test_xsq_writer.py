@@ -7,7 +7,13 @@ from pathlib import Path
 
 from xlights_mcp.xlights.models import ShowConfig
 from xlights_mcp.xlights.palettes import DEFAULT_PALETTE, ColorPalette
-from xlights_mcp.xlights.xsq_writer import EffectPlacement, SequenceSpec, write_xsq
+from xlights_mcp.xlights.xsq_writer import (
+    EffectPlacement,
+    SequenceSpec,
+    TimingTrack,
+    TimingTrackLabel,
+    write_xsq,
+)
 
 SHOW = ShowConfig(show_path=".", show_name="test")
 
@@ -67,3 +73,18 @@ def test_settings_keep_their_order_and_every_effect_refs_them(tmp_path):
     }
     assert db[int(by_element["A"])] == "Z_LAST=1,A_FIRST=2"
     assert db[int(by_element["B"])] == ""
+
+
+def test_timing_tracks_come_before_models_in_both_element_lists(tmp_path):
+    out = tmp_path / "s.xsq"
+    track = TimingTrack(name="Beats", labels=[[TimingTrackLabel(label="1", start_time_ms=0, end_time_ms=500)]])
+    spec = SequenceSpec(duration_ms=10000, effects=[_on("Roof")], timing_tracks=[track])
+
+    write_xsq(spec, SHOW, out)
+
+    root = ET.parse(out).getroot()
+    display = root.findall("DisplayElements/Element")
+    assert [(e.get("type"), e.get("name")) for e in display] == [("timing", "Beats"), ("model", "Roof")]
+    assert display[0].get("views") == ""
+    effects = root.findall("ElementEffects/Element")
+    assert [(e.get("type"), e.get("name")) for e in effects] == [("timing", "Beats"), ("model", "Roof")]
