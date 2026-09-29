@@ -188,7 +188,7 @@ def generate_sequence(
     vocal_assignments: dict[str, str] | None = None,
     progress: ProgressCallback | None = None,
 ) -> dict:
-    """Generate a complete xLights sequence from a music file.
+    """Write the baseline sequence for a music file (auto), or return the guided preview.
 
     Args:
         vocal_assignments: Optional mapping of model_name → vocal track name.

@@ -633,13 +633,14 @@ async def create_sequence(
 
     Args:
         mp3_path: Path to the .mp3 file
-        mode: Generation mode — "auto" (AI picks everything), "guided" (interactive),
-              or "template" (apply saved recipes)
+        mode: Generation mode — "auto" (the baseline described above), "guided" (returns
+              the analysis for an interactive session), "template" (not implemented yet)
         palette_hint: Optional colours: names (red, green, blue, white, warm white,
             yellow, orange, gold, purple, pink, magenta, cyan, ice) or #RRGGBB,
             separated by commas and/or "and". Unrecognised words are reported and
             ignored; with no usable hint, the theme's palette is used.
-        theme: Optional theme hint (e.g., "christmas", "halloween", "energetic")
+        theme: Optional theme: "christmas" or "halloween"; anything else uses the
+            Christmas palettes
         vocal_assignments: Optional mapping of model names to vocal track names.
             Use {"all": "<track_name>"} to assign one track to all singing models,
             or map individual models like {"Snowman": "Vocals", "Bulb Blue": "Full Mix Vocals"}.
