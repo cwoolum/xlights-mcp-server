@@ -58,8 +58,8 @@ def validate_plan(
         result.adjusted["clipped_to_end"] += clipped
         indexed.append((i, placement))
     result.errors.extend(_overlaps(indexed))
-    result.warnings.extend(_parent_child_warnings([p for _, p in indexed], show))
     result.placements = [p for _, p in indexed]
+    result.warnings.extend(_parent_child_warnings(result.placements, show))
     return result
 
 
@@ -156,9 +156,6 @@ def _settings(value) -> dict[str, str]:
         return {}
     if isinstance(value, dict):
         pairs = [(_settings_key(k), _settings_text(k, v)) for k, v in value.items()]
-        for key, text in pairs:
-            if "," in text:
-                raise PlanError(f"settings value for {key} contains a comma; xLights separates settings with commas")
     elif isinstance(value, str):
         pairs = []
         for part in value.split(","):
@@ -189,9 +186,12 @@ def _settings_text(key, value) -> str:
         return str(int(value))
     if isinstance(value, float) and not math.isfinite(value):
         raise PlanError(f"settings value for {key} must be finite, got {value!r}")
-    if isinstance(value, (str, int, float)):
-        return str(value)
-    raise PlanError(f"settings value for {key} must be a string, number or boolean, got {value!r}")
+    if not isinstance(value, (str, int, float)):
+        raise PlanError(f"settings value for {key} must be a string, number or boolean, got {value!r}")
+    text = str(value)
+    if "," in text:
+        raise PlanError(f"settings value for {key} contains a comma; xLights separates settings with commas")
+    return text
 
 
 def _palette(value) -> ColorPalette | None:
