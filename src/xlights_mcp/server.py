@@ -320,6 +320,8 @@ def inspect_sequence(sequence_name: str) -> dict:
     """
     from xlights_mcp.xlights.xsq_reader import read_xsq_summary
 
+    if not sequence_name.strip():
+        return {"error": "sequence name is required"}
     config = get_config()
     show_path = _active_show(config)
     if isinstance(show_path, dict):
@@ -354,6 +356,8 @@ def profile_sequence(xsq_path: str) -> dict:
     from xlights_mcp.xlights.profile import profile_sequence as build_profile
     from xlights_mcp.xlights.show import load_show_config
 
+    if not xsq_path.strip():
+        return {"error": "sequence name is required"}
     config = get_config()
     show_path = _active_show(config)
     if isinstance(show_path, dict):

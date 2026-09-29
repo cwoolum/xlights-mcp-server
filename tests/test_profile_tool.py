@@ -60,3 +60,8 @@ async def test_an_unreadable_sequence_is_an_error(active_show, monkeypatch):
     monkeypatch.setattr("xlights_mcp.xlights.profile.profile_sequence", locked)
 
     assert "denied" in (await call_tool("profile_sequence", {"xsq_path": "Human Style"}))["error"]
+
+
+@pytest.mark.parametrize("xsq_path", ["", "  "])
+async def test_a_blank_name_is_an_error(active_show, xsq_path):
+    assert await call_tool("profile_sequence", {"xsq_path": xsq_path}) == {"error": "sequence name is required"}

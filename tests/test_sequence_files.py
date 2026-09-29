@@ -144,3 +144,8 @@ async def test_list_sequences_skips_directories_and_marks_unreadable_files(activ
 
     flags = {s["name"]: s["generated"] for s in payload["sequences"]}
     assert flags == {"Hand": False, "Locked": None}
+
+
+@pytest.mark.parametrize("name", ["", "  "])
+async def test_inspect_sequence_needs_a_name(active_show, name):
+    assert await call_tool("inspect_sequence", {"sequence_name": name}) == {"error": "sequence name is required"}
