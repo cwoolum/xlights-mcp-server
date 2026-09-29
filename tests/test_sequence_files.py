@@ -12,7 +12,11 @@ from xlights_mcp import server as server_module
 from xlights_mcp.config import ServerConfig
 from xlights_mcp.xlights import xsq_reader
 from xlights_mcp.xlights.models import ShowConfig
-from xlights_mcp.xlights.xsq_reader import is_generated_file, latest_hand_made_sequence
+from xlights_mcp.xlights.xsq_reader import (
+    head_version,
+    is_generated_file,
+    latest_hand_made_sequence,
+)
 from xlights_mcp.xlights.xsq_writer import SequenceSpec, write_xsq
 
 HAND_MADE = "<xsequence><head><comment></comment></head><ElementEffects/></xsequence>"
@@ -33,6 +37,15 @@ def _hand_made(path: Path, mtime: float | None = None) -> Path:
 def test_is_generated_file(tmp_path):
     assert is_generated_file(_generated(tmp_path / "gen.xsq"))
     assert not is_generated_file(_hand_made(tmp_path / "hand.xsq"))
+
+
+def test_head_version_reads_the_head_and_is_none_when_missing_or_unreadable(tmp_path):
+    with_version = tmp_path / "v.xsq"
+    with_version.write_text("<xsequence><head><version> 2026.05 </version></head></xsequence>", encoding="utf-8")
+
+    assert head_version(with_version) == "2026.05"
+    assert head_version(_hand_made(tmp_path / "none.xsq")) is None
+    assert head_version(tmp_path / "missing.xsq") is None
 
 
 def test_latest_hand_made_sequence_skips_generated_files(tmp_path):

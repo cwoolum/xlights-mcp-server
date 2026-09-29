@@ -6,14 +6,14 @@ import re
 import sys
 from pathlib import Path
 
-from xlights_mcp.xlights.xsq_writer import DEFAULT_XLIGHTS_VERSION, HEAD_BYTES
+from xlights_mcp.xlights import xsq_reader
+from xlights_mcp.xlights.xsq_writer import DEFAULT_XLIGHTS_VERSION
 
 _UNINSTALL_ROOTS = (
     r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
     r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
 )
 _VERSION = re.compile(r"\d+\.\d+")
-_HEAD_VERSION = re.compile(r"<version>\s*(\d+\.\d+)\s*</version>")
 
 
 def installed_xlights_version(show_path: Path | None = None) -> str:
@@ -24,64 +24,60 @@ def installed_xlights_version(show_path: Path | None = None) -> str:
     return _show_folder_version(show_path) or DEFAULT_XLIGHTS_VERSION
 
 
+def _sort_key(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in text.split("."))
+
+
 def _registry_version() -> str | None:
     try:
-        entries = _read_uninstall_entries()
+        versions = _registry_versions()
     except (OSError, ValueError, ImportError):
         return None
-    found = [
-        v.strip() for name, v in entries if name.lower().startswith("xlights") and _VERSION.fullmatch(v.strip())
-    ]
-    return max(found, key=_sort_key, default=None)
+    return max((v for v in versions if _VERSION.fullmatch(v)), key=_sort_key, default=None)
 
 
-def _sort_key(text: str) -> tuple[int, int]:
-    year, _, minor = text.partition(".")
-    return int(year), int(minor)
-
-
-def _read_uninstall_entries() -> list[tuple[str, str]]:
+def _registry_versions() -> list[str]:
     import winreg
 
-    entries: list[tuple[str, str]] = []
+    versions: list[str] = []
     for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
         for root in _UNINSTALL_ROOTS:
             try:
                 with winreg.OpenKey(hive, root) as uninstall:
                     for i in range(winreg.QueryInfoKey(uninstall)[0]):
-                        entries.extend(_entry(uninstall, winreg.EnumKey(uninstall, i)))
+                        found = _xlights_display_version(uninstall, winreg.EnumKey(uninstall, i))
+                        if found:
+                            versions.append(found)
             except OSError:
                 continue
-    return entries
+    return versions
 
 
-def _entry(uninstall, subkey: str) -> list[tuple[str, str]]:
+def _xlights_display_version(uninstall, subkey: str) -> str | None:
     import winreg
 
     try:
         with winreg.OpenKey(uninstall, subkey) as key:
             name, _ = winreg.QueryValueEx(key, "DisplayName")
+            if not str(name).lower().startswith("xlights"):
+                return None
             display_version, _ = winreg.QueryValueEx(key, "DisplayVersion")
     except OSError:
-        return []
-    return [(str(name), str(display_version))]
+        return None
+    return str(display_version).strip()
+
+
+def _hand_made_version(xsq: Path) -> str | None:
+    try:
+        if xsq_reader.is_generated_file(xsq):
+            return None
+    except OSError:
+        return None
+    return xsq_reader.head_version(xsq)
 
 
 def _show_folder_version(show_path: Path | None) -> str | None:
     if show_path is None:
         return None
-    best: str | None = None
-    try:
-        sequences = list(Path(show_path).glob("*.xsq"))
-    except OSError:
-        return None
-    for sequence in sequences:
-        try:
-            with open(sequence, "rb") as f:
-                head = f.read(HEAD_BYTES).decode("utf-8", errors="ignore")
-        except OSError:
-            continue
-        match = _HEAD_VERSION.search(head)
-        if match and (best is None or _sort_key(match.group(1)) > _sort_key(best)):
-            best = match.group(1)
-    return best
+    found = (_hand_made_version(xsq) for xsq in show_path.glob("*.xsq"))
+    return max((v for v in found if v), key=_sort_key, default=None)
