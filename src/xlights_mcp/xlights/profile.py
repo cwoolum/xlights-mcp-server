@@ -18,8 +18,6 @@ MAX_ELEMENT_ROWS = 20
 TOP_EFFECTS = 3
 
 Span = tuple[int, int]
-
-
 Effect = tuple[str, int, int]
 
 
@@ -113,7 +111,7 @@ def _lit_at_once(lit: dict[str, list[Span]], duration_ms: int) -> np.ndarray:
     steps = np.zeros(samples + 1, dtype=int)
     for spans in lit.values():
         for start, end in spans:
-            first, stop = -(-start // SAMPLE_MS), -(-min(end, duration_ms) // SAMPLE_MS)
+            first, stop = -(-start // SAMPLE_MS), -(-end // SAMPLE_MS)
             if stop > first:
                 steps[first] += 1
                 steps[stop] -= 1
