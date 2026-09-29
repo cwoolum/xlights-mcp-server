@@ -11,6 +11,7 @@ from xlights_mcp.audio.analyzer import SongAnalysis
 from xlights_mcp.sequencer.plan import validate_plan
 from xlights_mcp.sequencer.timing import build_timing_tracks
 from xlights_mcp.xlights.effects import known_effect_names
+from xlights_mcp.xlights.models import ShowConfig
 from xlights_mcp.xlights.show import load_show_config
 from xlights_mcp.xlights.xsq_writer import SequenceSpec, TimingTrack, write_xsq
 
@@ -29,8 +30,9 @@ def write_plan(
     extra_tracks: Sequence[TimingTrack] = (),
     overwrite: bool = False,
     validate_only: bool = False,
+    show: ShowConfig | None = None,
 ) -> dict:
-    show = load_show_config(show_path)
+    show = show or load_show_config(show_path)
     validated = validate_plan(plan, show, analysis.duration_ms, known_effect_names(show_path))
     tracks, track_warnings, errors = build_timing_tracks(timing_tracks, analysis)
     tracks = [*tracks, *extra_tracks]

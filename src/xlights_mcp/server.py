@@ -621,16 +621,24 @@ async def create_sequence(
     vocal_assignments: dict[str, str] | None = None,
     show_name: str | None = None,
 ) -> dict:
-    """Create an xLights sequence from a music file.
+    """Create a baseline xLights sequence from a music file.
 
-    Analyzes the audio and generates a .xsq file with effects placed on
-    your light models according to the selected generation mode.
+    "auto" writes a simple baseline: quiet sections (intro, outro, breakdown) get the
+    largest wash group dimmed; other sections light half of the feature groups at a
+    time, alternating by height; chorus, drop and instrumental sections add short hits
+    on accent props at each downbeat. It includes Beats and Bars timing tracks, plus
+    Drums, Bass and Instruments when stems are available. It never overwrites an
+    existing sequence; it picks "<song> (generated N)" instead. For a hand-made-style
+    sequence, use the sequence_song prompt and write_sequence.
 
     Args:
         mp3_path: Path to the .mp3 file
         mode: Generation mode — "auto" (AI picks everything), "guided" (interactive),
               or "template" (apply saved recipes)
-        palette_hint: Optional color hint (e.g., "red and green", "orange and purple")
+        palette_hint: Optional colours: names (red, green, blue, white, warm white,
+            yellow, orange, gold, purple, pink, magenta, cyan, ice) or #RRGGBB,
+            separated by commas and/or "and". Unrecognised words are reported and
+            ignored; with no usable hint, the theme's palette is used.
         theme: Optional theme hint (e.g., "christmas", "halloween", "energetic")
         vocal_assignments: Optional mapping of model names to vocal track names.
             Use {"all": "<track_name>"} to assign one track to all singing models,

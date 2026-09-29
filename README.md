@@ -20,10 +20,11 @@ Give it an `.mp3`, and it will analyze the beats, song structure, and energy —
 ### 💡 Sequence Generation
 - **Generates valid `.xsq` files** that open directly in xLights — no xLights GUI required during generation
 - **Reads your actual show config** — knows your models, controllers, channel counts, and model types
-- **Intelligent effect selection** — picks effects based on model type (arches get chases, trees get spirals, etc.) and musical features (beats → shockwaves, choruses → high energy, verses → gentle)
-- **Theme-aware palettes** — Christmas (red/green/gold) and Halloween (orange/purple) color schemes
+- **Baseline sequences** — works from your xLights groups: a dimmed wash in quiet sections, feature groups taking turns by height, and short accent hits on downbeats in choruses and drops
+- **Hand-made-style sequences** — the `sequence_song` prompt walks your AI through planning a sequence section by section and writing it with `write_sequence`
+- **Palettes** — colour names or `#RRGGBB` via `palette_hint`, or a theme's colours (Christmas, Halloween, …)
 - **Three generation modes:**
-  - **Automatic** — AI picks everything, you review in xLights
+  - **Automatic** — writes the baseline, you review in xLights
   - **Guided** — AI shows song structure, you choose effects per section
   - **Template** — define reusable effect recipes, AI places them on beat
 - **Never overwrites** — existing sequences are safe; generated files get a `(generated N)` suffix
@@ -235,7 +236,7 @@ Once connected, interact with the server through natural language in your AI too
 ```
 
 When generating, you'll be asked to choose a mode:
-- **auto** — fully automatic, AI picks effects and colors
+- **auto** — writes a simple baseline sequence
 - **guided** — see the song structure first, then choose effects per section
 - **template** — apply saved effect recipes to detected sections
 
@@ -292,7 +293,7 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 ### Sequence Generation
 | Tool | Description |
 |------|-------------|
-| `create_sequence` | Generate a `.xsq` file from an `.mp3` with effects on all models |
+| `create_sequence` | Generate a baseline `.xsq` from an `.mp3`: wash in quiet sections, feature groups taking turns, accents on downbeats (use the `sequence_song` prompt for hand-made-style sequences) |
 | `write_sequence` | Validate an effect plan (element, layer 0–2, effect, times, settings, palette) against the show and song, then write it as an `.xsq`, with optional Beats/Bars/stem timing tracks; `validate_only` returns the report without writing |
 | `preview_plan` | Preview the generation plan without writing a file |
 
@@ -316,28 +317,15 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 
 ### Effect Selection Logic
 
-The server maps **model types** to appropriate effects:
+`create_sequence` (auto mode) writes a small baseline from the show's xLights groups, tiered into wash, feature and skip groups:
 
-| Model Type | Best Effects |
-|------------|-------------|
-| Arches | SingleStrand, Chase, ColorWash, Morph |
-| Tree | Spirals, Pinwheel, Meteors, Circles |
-| Single Line | Chase, Morph, SingleStrand, Shimmer |
-| Poly Line | Chase, SingleStrand, Twinkle, Morph |
-| Window Frame | Marquee, ColorWash, On, Curtain |
-| Custom shapes | Shockwave, Circles, Plasma, Twinkle, Warp |
+| Section | What lights |
+|---------|-------------|
+| Intro, outro, breakdown | The largest wash group, dimmed Color Wash |
+| Verse, bridge, build, transition | Half of the feature groups (split by height, alternating each section) |
+| Chorus, drop, instrumental | The same, plus a short `On` on an accent prop at each downbeat, skipping props inside the lit groups |
 
-And maps **musical features** to effect choices:
-
-| Musical Feature | Effects |
-|----------------|---------|
-| Strong beats | Shockwave, Morph, Strobe |
-| Rhythmic passages | SingleStrand, Chase, Bars, Marquee |
-| High energy (chorus) | Chase, Meteors, SingleStrand |
-| Low energy (verse) | Twinkle, Shimmer, ColorWash, Snowflakes |
-| Sustained notes | Plasma, Pinwheel, Spirals, Galaxy |
-| Transitions | Warp, Curtain, Morph |
-| Intro/Outro | Curtain, ColorWash, Twinkle |
+Feature-group effects follow the group's majority model type (arches get chases, trees get spirals, …): gentle effects below 0.65 energy, motion effects above. Singing-face models get a background plus a `Faces` effect driven by the assigned lyric track. Beats and Bars timing tracks are always added, and Drums, Bass and Instruments when stems are available. For anything richer, use the `sequence_song` prompt, which plans a hand-made-style sequence and writes it with `write_sequence`.
 
 ### File Format
 

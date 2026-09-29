@@ -1,0 +1,128 @@
+"""create_sequence auto mode: the baseline plan written through write_plan."""
+
+from __future__ import annotations
+
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+import numpy as np
+import pytest
+from show_fixtures import make_analysis
+
+from xlights_mcp.audio.cache import save_cached
+from xlights_mcp.audio.lyrics import LyricTrack, LyricWord, PhonemeEvent
+from xlights_mcp.audio.sections import SongSection
+from xlights_mcp.config import AudioConfig
+from xlights_mcp.sequencer import engine
+from xlights_mcp.sequencer.engine import generate_sequence
+
+
+@pytest.fixture
+def audio(tmp_path: Path, click_track: Path) -> AudioConfig:
+    config = AudioConfig(cache_dir=tmp_path / "cache")
+    analysis = make_analysis(
+        20.0,
+        np.arange(0, 20, 0.5).tolist(),
+        np.arange(0, 20, 2.0).tolist(),
+        path=click_track,
+        sections=[
+            SongSection(label="intro", start_time=0.0, end_time=4.0, energy_level=0.2),
+            SongSection(label="chorus", start_time=4.0, end_time=20.0, energy_level=0.8),
+        ],
+    )
+    save_cached(analysis, click_track, config.cache_dir)
+    return config
+
+
+def _generate(click_track, show, audio, **kw) -> dict:
+    return generate_sequence(mp3_path=click_track, show_path=show, mode="auto", audio_config=audio, **kw)
+
+
+def _elements(path: str) -> dict[str, list[ET.Element]]:
+    root = ET.parse(path).getroot()
+    return {
+        el.get("name"): [e for layer in el.iterfind("EffectLayer") for e in layer.iterfind("Effect")]
+        for el in root.iterfind("ElementEffects/Element")
+    }
+
+
+def test_writes_the_baseline_with_beats_and_bars(click_track, show_copy, audio):
+    result = _generate(click_track, show_copy, audio, palette_hint="orange and teal")
+
+    assert result["success"] is True
+    assert Path(result["output_path"]) == show_copy / f"{click_track.stem}.xsq"
+    assert result["timing_tracks"] == ["Beats", "Bars"]
+    assert result["palette"] == ["#FF6600"]
+    assert result["palette_unrecognised"] == ["teal"]
+    assert result["total_effects"] > 0
+    elements = _elements(result["output_path"])
+    assert elements["Everything Flat"][0].get("name") == "Color Wash"
+
+
+def test_never_overwrites_an_existing_sequence(click_track, show_copy, audio):
+    (show_copy / f"{click_track.stem}.xsq").write_text("mine", encoding="utf-8")
+
+    result = _generate(click_track, show_copy, audio)
+
+    assert Path(result["output_path"]).name == f"{click_track.stem} (generated 1).xsq"
+    assert (show_copy / f"{click_track.stem}.xsq").read_text(encoding="utf-8") == "mine"
+
+
+def test_a_show_with_only_placeholders_is_an_error(tmp_path, click_track, audio):
+    show = tmp_path / "placeholders"
+    show.mkdir()
+    (show / "xlights_rgbeffects.xml").write_text(
+        '<xrgb><models><model name="Spare - Dont Map" DisplayAs="Single Line"/></models></xrgb>', encoding="utf-8"
+    )
+
+    assert "error" in _generate(click_track, show, audio)
+
+
+@pytest.fixture
+def singing_show(show_copy: Path) -> Path:
+    xml = show_copy / "xlights_rgbeffects.xml"
+    text = xml.read_text(encoding="utf-8").replace(
+        '<model name="Lantern2" DisplayAs="Custom" WorldPosY="100.0"/>',
+        '<model name="Lantern2" DisplayAs="Custom" WorldPosY="100.0"><faceInfo Name="Singing Face"/></model>',
+    )
+    xml.write_text(text, encoding="utf-8")
+    return show_copy
+
+
+def _lyrics() -> LyricTrack:
+    return LyricTrack(
+        words=[LyricWord(word="boo", start_time=1.0, end_time=1.5)],
+        phonemes=[PhonemeEvent(phoneme="U", start_time_ms=1000, end_time_ms=1500)],
+        track_name="Vocals",
+        available=True,
+    )
+
+
+def test_singing_models_without_lyrics_get_no_effects_and_a_warning(click_track, singing_show, audio, monkeypatch):
+    monkeypatch.setattr(engine, "_try_extract_vocal_tracks", lambda _path: [])
+
+    result = _generate(click_track, singing_show, audio)
+
+    assert any("Lyrics unavailable" in w for w in result["warnings"])
+    assert "Lantern2" not in _elements(result["output_path"]) or not _elements(result["output_path"])["Lantern2"]
+
+
+def test_singing_models_need_assignments_before_anything_is_written(click_track, singing_show, audio, monkeypatch):
+    monkeypatch.setattr(engine, "_try_extract_vocal_tracks", lambda _path: [_lyrics()])
+
+    result = _generate(click_track, singing_show, audio)
+
+    assert result["needs_vocal_assignment"] is True
+    assert list(singing_show.glob("*.xsq")) == []
+
+
+def test_faces_are_sequenced_and_groups_holding_them_left_out(click_track, singing_show, audio, monkeypatch):
+    monkeypatch.setattr(engine, "_try_extract_vocal_tracks", lambda _path: [_lyrics()])
+
+    result = _generate(click_track, singing_show, audio, vocal_assignments={"all": "Vocals"})
+
+    assert result["has_lyrics"] is True and result["singing_models"] == ["Lantern2"]
+    elements = _elements(result["output_path"])
+    assert any(e.get("name") == "Faces" for e in elements["Lantern2"])
+    assert not elements.get("Lanterns") and not elements.get("Everything Flat")
+    assert "Vocals" in result["timing_tracks"]

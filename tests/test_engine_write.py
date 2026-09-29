@@ -33,3 +33,4 @@ def test_auto_mode_writes_effects_with_refs_and_palettes(
     effects = [e for e in root.iter("Effect") if e.get("name")]
     assert effects
     assert all(e.get("ref") is not None and e.get("palette") is not None for e in effects)
+    assert result["success"] is True
