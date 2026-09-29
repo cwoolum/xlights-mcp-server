@@ -14,6 +14,7 @@ from xlights_mcp.config import ServerConfig
 from xlights_mcp.prompts import render_sequence_song
 
 HUMAN_STYLE = Path(__file__).parent / "fixtures" / "sequences" / "Human Style.xsq"
+DEFAULT_TEXT = render_sequence_song("Song.mp3", None, None)
 
 
 def test_renders_every_placeholder():
@@ -30,21 +31,15 @@ def test_a_reference_is_profiled():
 
 
 def test_without_a_reference_it_gives_default_targets():
-    text = render_sequence_song("Song.mp3", None, None)
-
-    assert "no hand-made sequence" in text.lower()
+    assert "no hand-made sequence" in DEFAULT_TEXT.lower()
 
 
 def test_an_existing_sequence_gets_a_new_name_unless_the_user_agreed_to_replace_it():
-    text = render_sequence_song("Song.mp3", None, None)
-
-    assert "pass a new `name`, or `overwrite: true` only if the user agreed" in text
+    assert "pass a new `name`, or `overwrite: true` only if the user agreed" in DEFAULT_TEXT
 
 
 def test_accents_follow_drum_onsets():
-    text = render_sequence_song("Song.mp3", None, None)
-
-    assert "drum onsets" in text and "kick" not in text
+    assert "drum onsets" in DEFAULT_TEXT and "kick" not in DEFAULT_TEXT
 
 
 def test_show_notes_are_embedded():
@@ -127,36 +122,28 @@ async def test_unreadable_show_notes_are_left_out(active_show, make_notes):
 
 
 def test_layer_zero_is_said_to_draw_on_top():
-    text = render_sequence_song("Song.mp3", None, None)
-
-    assert "Layer 0 is drawn on top" in text
-    assert "bases (wash, Plasma, solid colour) on the highest layer" in text
-    assert "most elements need only layer 0" not in text
+    assert "Layer 0 is drawn on top" in DEFAULT_TEXT
+    assert "bases (wash, Plasma, solid colour) on the highest layer" in DEFAULT_TEXT
+    assert "most elements need only layer 0" not in DEFAULT_TEXT
 
 
 def test_blend_modes_are_explained():
-    text = render_sequence_song("Song.mp3", None, None)
-
-    assert '`"blend"`' in text
-    assert all(f"`{mode}`" in text for mode in ("Additive", "1 reveals 2", "Max", "Layered"))
+    assert '`"blend"`' in DEFAULT_TEXT
+    assert all(f"`{mode}`" in DEFAULT_TEXT for mode in ("Additive", "1 reveals 2", "Max", "Layered"))
 
 
 def test_value_curves_are_explained_in_real_units():
-    text = render_sequence_song("Song.mp3", None, None)
-
-    assert "E_VALUECURVE_<setting>" in text and "RV=TRUE" in text
-    assert "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|Type=Ramp" in text
-    assert "not percentages" in text
-    assert "check the ramp in xLights the first time" in text
+    assert "E_VALUECURVE_<setting>" in DEFAULT_TEXT and "RV=TRUE" in DEFAULT_TEXT
+    assert "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|Type=Ramp" in DEFAULT_TEXT
+    assert "not percentages" in DEFAULT_TEXT
+    assert "check the ramp in xLights the first time" in DEFAULT_TEXT
 
 
 def test_value_curve_strings_are_only_copied_from_current_version_sequences():
-    text = render_sequence_song("Song.mp3", None, None)
-
-    assert "Copy working strings only from sequences saved in the current xLights version" in text
-    assert "`inspect_sequence` shows a sequence's `version`" in text
-    assert "check Min and Max against the units above" in text
+    assert "Copy working strings only from sequences saved in the current xLights version" in DEFAULT_TEXT
+    assert "`inspect_sequence` shows a sequence's `version`" in DEFAULT_TEXT
+    assert "check Min and Max against the units above" in DEFAULT_TEXT
 
 
 def test_music_sparkles_are_offered_on_palettes():
-    assert "`music_sparkles: true` (with `sparkles` above 0)" in render_sequence_song("Song.mp3", None, None)
+    assert "`music_sparkles: true` (with `sparkles` above 0)" in DEFAULT_TEXT

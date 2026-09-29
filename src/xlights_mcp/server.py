@@ -704,11 +704,11 @@ async def write_sequence(
     - element: a model or group name (list_models / get_show_layout); submodels aren't supported.
     - layer: 0-2 (default 0; 0 is drawn on top). effect: an xLights effect name (list_effects, or
       any effect already used in this show's sequences).
-    - blend: how the placement mixes with the layers below it (default "Normal"). One of Normal,
-      Effect 1, Effect 2, 1 is Mask, 2 is Mask, 1 is Unmask, 2 is Unmask, 1 is True Unmask,
-      2 is True Unmask, 1 reveals 2, 2 reveals 1, Shadow 1 on 2, Shadow 2 on 1, Layered, Average,
-      Bottom-Top, Left-Right, Additive, Subtractive, Brightness, Max, Min (any case). It sets
-      T_CHOICE_LayerMethod, so don't also put that key in settings.
+    - blend: how the placement mixes with the layers below it (default "Normal"). Useful ones:
+      "Additive" (white or same-hue accents), "1 reveals 2" (coloured hits keep their colour),
+      "Max" (texture over texture), "Layered" (fills the dark areas below). Any xLights mix
+      type is accepted in any case; unknown names get suggestions. It is shorthand for
+      T_CHOICE_LayerMethod, so don't give both.
     - settings: {key: value} (values must be strings, numbers or booleans, and can't contain
       commas) or a raw "K=V,K=V" string.
     - palette: {"colors": ["#RRGGBB", ...] (1-8), "brightness": 0-400 (default 100),
