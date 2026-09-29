@@ -6,26 +6,28 @@ Covers rank 2 of `E:\XLights\mcp-sharp-edges.md`. That rank bundles these findin
 - "Drum silences start when the kick's tail dies"
 - "Stem silences end early too"
 - "Beat grid vs kicks inside drops"
-- the stem-dropout rough edges (merging, the `other`/`Instruments` naming mismatch, spans past the grid)
+- two of the stem-dropout rough edges: merging nearby spans, and the `other`/`Instruments` naming mismatch
+
+A `snap: beat|bar` option is deferred.
 
 ## Problem
 
 Stem silences come from energy alone: the stem counts as silent when its normalised RMS stays below 0.05 for at least 1 s (`drums.find_silences`). This goes wrong in three ways, all measured on Ghosts 'n' Stuff:
 - **Drum silences start late.** The last kick before the build is at 51.246 s, but the silence starts at 53.081 s because the kick's reverb tail stays above the threshold.
-- **Bass silences end early.** The bridge silence ends at 123.62 s, but the bass doesn't come back until its first hit at 125.27 s. A faint rumble crosses the threshold first.
+- **Bass silences end early.** The bridge silence ends at 123.62 s, but the bass doesn't come back until its first hit at 125.27 s. A faint rumble (mean 0.058) crosses the threshold first.
 - **Drums read as present when they aren't.** 2:05.4–2:09.8 has no drum hits, but energy of about 0.06 (synth bleed) keeps it out of the silences.
 
-Kicks are also invisible to callers. `onset_bass` tells kicks from hats for bar-1 anchoring, but no tool returns kicks. In some drop bars the beat grid runs up to about 80 ms off the kick, so accents timed to the grid land slightly late.
+Kicks are also invisible to callers. `onset_bass` tells kicks from hats for bar-1 anchoring, but no tool returns kicks. In drops, 4 of the 100 downbeats are 64–87 ms late against the kick, so accents timed to the grid land late.
 
 ## Scope
 
 Query level only. The stored `StemOnsets.silences` (energy-based) and everything built on them stay unchanged:
 - drum runs,
 - bar-1 re-anchoring,
-- EDM section labels,
+- EDM section labels and `sections[].drums`,
 - "decaying" flags.
 
-There's no `ANALYSIS_VERSION` bump and no re-analysis. Feeding hit-bounded silences into structure is a possible later change.
+There's no `ANALYSIS_VERSION` bump and no re-analysis.
 
 ## Hit-bounded silences
 
@@ -35,77 +37,120 @@ A new module, `src/xlights_mcp/audio/silences.py`, provides:
 bounded_silences(analysis, stem, min_ms=1000, merge_gap_ms=0) -> list[tuple[float, float]]  # seconds
 ```
 
-The result is computed from the cached analysis: `onset_times`, `silences`, the beat grid and the duration.
+The spans are computed over the whole song from the cached `onset_times`, the stored energy silences, the energy curve, the beat grid and the duration. Onsets are sorted and deduplicated first.
 
-**Drums**, being purely percussive, are bounded by their hits:
+**Drums** are purely percussive, so hits bound their silences:
 - The candidate spans are:
   - the gap before the first hit, `[0, first)`;
   - the gaps between consecutive hits `a` and `b`, as `[beat_after(a), b)`;
   - the gap after the last hit, `[beat_after(last), duration)`.
 - A drum stem with no hits is one span covering the whole song.
-- `beat_after(t)` is the first grid beat later than `t + 0.05 s`, so a hit that sits on a beat moves to the next beat. When `t` is past the last grid beat, `beat_after(t)` is `t + beat_period`, where `beat_period` is the median beat interval (0.5 s without a grid). The result is capped at the duration.
+- `beat_after(t)` is the first grid beat strictly later than `t + 0.1 s`, so a hit on or up to 100 ms before a beat moves to the next beat. When there's no such beat, or the grid has fewer than 2 beats, `beat_after(t)` is `t + beat_period`. `beat_period` is the median grid interval, or 0.5 s when the grid has fewer than 2 beats.
 - Spans with `end <= start` are dropped.
 
-**Bass, other, vocals** are sustained, so their hits don't mark the silence start. A held note has no new hit but is still sounding. For each stored energy silence `[s, e)`:
+**Bass, other, vocals** are sustained, so a held note has no new hit but is still sounding. For each stored energy silence `[s, e)`:
 - The start stays `s`.
-- The end becomes the first hit at or after `e - 0.1 s`, if that hit is no more than 2 bars (8 beat periods) after `e`. Otherwise the end stays `e`.
-- A hit inside `[s, e)` below the energy threshold is ignored.
+- The end is the first energy frame at or after `e` where energy is at least `2 × SILENCE_THRESHOLD` (0.1). The stem has to be clearly back, which a faint rumble isn't.
+  - If a hit lies within 0.1 s of that frame, the end snaps to the nearest such hit.
+  - If energy never reaches 0.1, the end is the duration.
+- Hits inside `[s, e)` don't split or shorten the span.
+- Ends can move a little earlier, by at most 0.1 s, when they snap to a hit.
+- Their measured results on Ghosts:
+
+  | Span | New end |
+  |---|---|
+  | bridge bass (was 123.62) | 125.272, the bass's return hit |
+  | intro bass | 7.709 |
+  | `other` spans | stay within about 0.2 s of their stored ends |
 
 **Then, for every stem:**
-1. Merge spans whose gap is less than `merge_gap_ms`.
+1. Clamp each span to `[0, duration]`.
 2. Drop spans shorter than `min_ms`.
-3. Return the spans sorted.
+3. Merge spans whose gap is less than `merge_gap_ms`. Overlapping or touching spans always merge, even at 0.
+4. Sort.
+
+Filtering before merging matters: merging first would chain the tiny gaps between hi-hats into a span over real kicks.
+
+For bass, other and vocals, a `min_ms` below 1000 has no effect, because their stored silences are already at least 1 s long (`MIN_SILENCE_S`).
+
+On Ghosts, the defaults give 5 drum spans: [0, 7.036), [51.710, 65.945), [110.540, 137.509), [137.650, 139.482), [184.041, 187.288).
+- With `merge_gap_ms=500`, the two breakdown spans join into [110.540, 139.482).
+- A drum silence can end on a kickless pickup a beat before the drop: 65.945 and 139.482 here. The drop's own hit is the next kick.
 
 ## Kicks
 
-`kicks(analysis) -> list[float]` returns the drum hits whose `onset_bass` is at least `drums.KICK_THRESHOLD` (0.3), sorted. If `onset_bass` doesn't line up with `onset_times` (a malformed cache), the result is an error rather than an empty list.
+`kicks(analysis) -> list[float]` returns the drum hits whose `onset_bass` is at least `drums.KICK_THRESHOLD` (0.3), sorted and deduplicated.
+- It raises `ValueError` when stems are unavailable, the drums stem is missing, or `onset_bass` doesn't line up with `onset_times`. Callers decide how to report that.
+- Zero kicks is a valid empty list.
+- On Ghosts, 252 of the 526 drum hits are kicks, and 63 of the 100 downbeats have a kick within 100 ms.
 
 ## API
 
 **`get_stem_events`:**
-- `kind` gains `"kicks"`, which works only with `stem="drums"` (anything else is an error). It returns `events_ms` in the same shape as `onsets`, with the same windowing and `max_events` truncation.
-- `kind="silences"` returns `bounded_silences(...)` spans. It gains `min_ms` (default 1000, at least 0) and `merge_gap_ms` (default 0, at least 0); both are ignored for other kinds.
-- `stem="instruments"` is an alias for `other`, matching the `Instruments` timing track. The response reports `stem: "other"`.
-- The docstring describes the drum and sustained-stem rules in one line each.
+- **`kind="kicks"`** (added to `VALID_KINDS`) works only with `stem="drums"`. Any other stem gives "kind 'kicks' needs stem 'drums'". It returns `events_ms` in the same shape as `onsets`, with the same windowing and `max_events` truncation. A `ValueError` from `kicks()` comes back as `{"error": ...}`.
+- **`kind="silences"`** returns `bounded_silences(...)` spans:
+  - computed over the whole song, then clipped to `start_ms`/`end_ms` as today, so a clipped span can be shorter than `min_ms`;
+  - new parameters `min_ms` (default 1000) and `merge_gap_ms` (default 0).
+- **Validation:** `validate_stem_query` checks both new parameters for every kind. The errors are "min_ms must be >= 0" and "merge_gap_ms must be >= 0".
+- **The `instruments` alias:** `stem` is matched case-insensitively, and `"instruments"` means `other`. The alias is resolved before validation and listed in the "Unknown stem" message. The response reports `stem: "other"`.
+- **Docstring:** one line each on the drum and sustained rules. It also says:
+  - a drum silence can end on a pickup, so use `kind="kicks"` for the drop hit;
+  - `merge_gap_ms` of about 150–500 joins silences split by a stray hi-hat or FX hit.
 
-**`analyze_song`:** the `stems.<name>.silences_ms` summary uses `bounded_silences` with default parameters, so it agrees with `get_stem_events`.
+**`analyze_song`:** the `stems.<name>.silences_ms` summary uses `bounded_silences` with default parameters, clamped to the duration, so it agrees with `get_stem_events`. The docstring notes that `sections[].drums` still comes from the energy-based structure analysis.
 
-**`write_sequence`:** `timing_tracks` accepts `"Kicks"`, one mark per kick. Marks are frame-rounded and each one ends where the next starts, like the other onset tracks. Without stems the track is skipped with a warning, like `Drums`.
+**`write_sequence` timing tracks:**
+- `"Kicks"` joins `STEM_TRACK_NAMES` and `TIMING_TRACK_NAMES`, but not `_STEM_TRACKS`. That table's generic branch emits every onset of a stem.
+- `build_timing_tracks` builds it from `kicks()`: one mark per kick, frame-rounded, each ending where the next starts.
+- When `kicks()` raises or returns no kicks, the track is skipped with a warning, as `Drums` is without stems.
+- The existing check against model and group names applies.
 
 **`create_sequence`:**
-- The baseline adds the `Kicks` timing track whenever stems are available.
-- Each downbeat accent starts at the nearest kick within 100 ms of the downbeat, or at the downbeat itself when there's none, and is then frame-rounded. The existing "not in the last frame" guard still applies.
+- `STEM_TIMING_TRACKS` now includes `Kicks`, so the baseline asks for it whenever stems are available.
+- Each downbeat accent starts at the nearest kick within 100 ms of the downbeat, or at the downbeat itself when there's none, and is then frame-rounded.
+- When `kicks()` raises, accents stay on downbeats with no warning. The Kicks track's own warning already says so.
+- The existing "not in the last frame" guard still applies.
 
-**Playbook (`sequence_song.md`):** step 1 says to time dropouts from `get_stem_events(kind="silences")` and hits from `kind="kicks"`. It also lists the `Kicks` timing track.
+**Playbook (`sequence_song.md`):** step 1 says to time dropouts from `get_stem_events(kind="silences")` (with `merge_gap_ms` to join split dropouts) and hits from `kind="kicks"`, and lists the `Kicks` timing track.
 
 ## Testing
 
-**Unit tests with synthetic `StemOnsets` and beat grids:**
+**Unit tests with synthetic `StemOnsets`, energy curves and beat grids:**
 - **Drums:**
   - a silence starts on the beat after the last hit, not at the energy start (the tail case);
   - a stretch with no hits but some energy is silent (the bleed case);
   - an empty stem is silent throughout;
-  - a hit on a beat moves to the next beat;
-  - a span past the end of the grid uses `beat_period`.
+  - a hit on a beat, or up to 100 ms before it, moves to the next beat;
+  - a span past the end of the grid uses `beat_period`, and a grid with fewer than 2 beats uses 0.5 s;
+  - duplicate onsets are handled.
 - **Sustained stems:**
-  - the end moves to the next hit within 2 bars (the rumble case);
-  - the end stays when the next hit is too far away;
-  - a held note with no hits and energy above the threshold isn't silent;
+  - the end moves to the hit where energy returns above 0.1 (the rumble case);
+  - a held note right after a silence, with no hit and energy above 0.1, keeps the stored end (the intro-bass case);
+  - energy that never returns runs the span to the duration;
+  - hits inside a span don't split it;
   - the start is unchanged.
-- **`min_ms` and `merge_gap_ms`**, including zero and negative values (negative is rejected).
-- **Kicks:** the threshold boundary, sorting, a non-drums stem is an error, and a length mismatch is an error.
+- **`min_ms` and `merge_gap_ms`:**
+  - filtering happens before merging (a busy hi-hat stretch doesn't become silent);
+  - overlapping and touching spans merge at 0;
+  - spans clamp to the duration;
+  - negative values are rejected.
+- **Kicks:** the threshold boundary, sorting, deduplication, and each error case.
 - **Tools:**
-  - `get_stem_events` returns kicks and bounded silences with the new parameters;
-  - the `instruments` alias works;
+  - `get_stem_events` returns kicks, and bounded silences with the new parameters;
+  - the `instruments` alias works in any case;
+  - kicks with a non-drums stem is an error;
   - the `analyze_song` summary uses the bounded spans.
-- **Timing tracks:** a `Kicks` track is built, and without stems it's a warning.
+- **Timing tracks:** a `Kicks` track is built, and with no stems or no kicks it's a warning.
 - **Baseline:**
-  - an accent snaps to a kick 60 ms away;
+  - an accent snaps to a kick 60 ms early;
   - an accent stays on the downbeat when the nearest kick is 150 ms away;
   - the `Kicks` track is present with stems.
 
 **Manual check against the cached Ghosts 'n' Stuff analysis:**
-- the drum silence after 51.246 s starts at the next beat, about 51.7 s, not 53.08;
-- the bridge bass silence ends at 125.27 s, not 123.62;
-- drums are silent across 2:05.4–2:09.8;
-- the section labels and drop anchors are unchanged.
+- the drum silence starts at 51.710;
+- the bridge bass silence ends at 125.272;
+- the intro bass silence still ends at about 7.7;
+- drums are silent across 125.4–129.8 s;
+- `merge_gap_ms=500` joins the breakdown into [110.540, 139.482);
+- every accent within 100 ms of a kick sits on the kick's frame, and the 4 that were 64–87 ms late
+  move by two or more frames (for example 79.290 → 79.226 and 149.140 → 149.072).
