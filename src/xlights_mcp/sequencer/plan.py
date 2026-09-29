@@ -7,6 +7,7 @@ import math
 import re
 from collections import defaultdict
 from collections.abc import Iterable
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 
 from xlights_mcp.sequencer.timing import last_frame_ms, to_frame
@@ -16,6 +17,8 @@ from xlights_mcp.xlights.palettes import ColorPalette
 from xlights_mcp.xlights.xsq_writer import EffectPlacement
 
 MAX_LAYER = 2
+_PLACEMENT_KEYS = ("element", "layer", "effect", "start_ms", "end_ms", "settings", "palette")
+_PALETTE_KEYS = ("colors", "brightness", "sparkles")
 PARENT_CHILD_PAIRS_LISTED = 10
 _HEX_COLOUR = re.compile(r"#[0-9A-Fa-f]{6}")
 
@@ -33,15 +36,16 @@ class ValidatedPlan:
 
 
 def validate_plan(
-    plan: list, show: ShowConfig, duration_ms: int, effect_names: frozenset[str]
+    plan: list[object], show: ShowConfig, duration_ms: int, effect_names: AbstractSet[str]
 ) -> ValidatedPlan:
     result = ValidatedPlan()
-    elements = {m.name for m in show.models} | {g.name for g in show.model_groups}
+    models = {m.name for m in show.models}
+    elements = models | {g.name for g in show.model_groups}
     song_end = last_frame_ms(duration_ms)
     indexed: list[tuple[int, EffectPlacement]] = []
     for i, raw in enumerate(plan):
         try:
-            placement, rounded, clipped = _placement(raw, elements, effect_names, song_end)
+            placement, rounded, clipped = _placement(raw, models, elements, effect_names, song_end)
         except PlanError as e:
             result.errors.append(f"placement {i}{_describe(raw)}: {e}")
             continue
@@ -54,16 +58,23 @@ def validate_plan(
     return result
 
 
-def _describe(raw) -> str:
+def _describe(raw: object) -> str:
     if not isinstance(raw, dict):
         return ""
     return f" ({raw.get('element')!r}, layer {raw.get('layer', 0)}, {raw.get('start_ms')}-{raw.get('end_ms')} ms)"
 
 
-def _placement(raw, elements, effect_names, song_end) -> tuple[EffectPlacement, bool, bool]:
+def _placement(
+    raw: object,
+    models: set[str],
+    elements: set[str],
+    effect_names: AbstractSet[str],
+    song_end: int,
+) -> tuple[EffectPlacement, bool, bool]:
     if not isinstance(raw, dict):
         raise PlanError("must be an object")
-    element = _element(raw.get("element"), elements)
+    _check_keys(raw, _PLACEMENT_KEYS)
+    element = _element(raw.get("element"), models, elements)
     layer = raw.get("layer", 0)
     if not _is_int(layer) or not 0 <= layer <= MAX_LAYER:
         raise PlanError(f"layer must be an integer 0-{MAX_LAYER}, got {layer!r}")
@@ -81,6 +92,12 @@ def _placement(raw, elements, effect_names, song_end) -> tuple[EffectPlacement, 
     return placement, rounded, clipped
 
 
+def _check_keys(mapping: dict, allowed: tuple[str, ...]) -> None:
+    for key in mapping:
+        if key not in allowed:
+            raise PlanError(f"unknown key {key!r}{_suggest(str(key), allowed)}")
+
+
 def _is_int(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
@@ -91,17 +108,17 @@ def _suggest(name: str, choices: Iterable[str]) -> str:
     return f"; did you mean {', '.join(repr(by_lower[c]) for c in close)}?" if close else ""
 
 
-def _element(name, elements: set[str]) -> str:
+def _element(name, models: set[str], elements: set[str]) -> str:
     if not isinstance(name, str) or not name:
         raise PlanError("element is required")
     if name in elements:
         return name
-    if "/" in name:
+    if "/" in name and name.split("/", 1)[0] in models:
         raise PlanError(f"{name!r} is a submodel; submodel elements aren't supported yet, use a group")
     raise PlanError(f"unknown element {name!r}{_suggest(name, elements)}")
 
 
-def _effect(name, effect_names: frozenset[str]) -> str:
+def _effect(name, effect_names: AbstractSet[str]) -> str:
     if not isinstance(name, str) or not name:
         raise PlanError("effect is required")
     if name in effect_names:
@@ -116,6 +133,8 @@ def _times(start, end, song_end: int) -> tuple[int, int, bool, bool]:
     if start < 0:
         raise PlanError(f"start_ms must be >= 0, got {start}")
     frame_start, frame_end = to_frame(start), to_frame(end)
+    if frame_start >= song_end:
+        raise PlanError(f"starts after the song ends (last frame {song_end} ms)")
     rounded = (frame_start, frame_end) != (start, end)
     clipped = frame_end > song_end
     frame_end = min(frame_end, song_end)
@@ -128,7 +147,7 @@ def _settings(value) -> dict[str, str]:
     if value is None or value == "":
         return {}
     if isinstance(value, dict):
-        pairs = [(k, str(int(v)) if isinstance(v, bool) else str(v)) for k, v in value.items()]
+        pairs = [(_settings_key(k), _settings_text(k, v)) for k, v in value.items()]
         for key, text in pairs:
             if "," in text:
                 raise PlanError(f"settings value for {key} contains a comma; xLights separates settings with commas")
@@ -151,11 +170,28 @@ def _settings(value) -> dict[str, str]:
     return settings
 
 
+def _settings_key(key) -> str:
+    if not isinstance(key, str):
+        raise PlanError(f"settings keys must be strings, got {key!r}")
+    return key
+
+
+def _settings_text(key, value) -> str:
+    if isinstance(value, bool):
+        return str(int(value))
+    if isinstance(value, float) and not math.isfinite(value):
+        raise PlanError(f"settings value for {key} must be finite, got {value!r}")
+    if isinstance(value, (str, int, float)):
+        return str(value)
+    raise PlanError(f"settings value for {key} must be a string, number or boolean, got {value!r}")
+
+
 def _palette(value) -> ColorPalette | None:
     if value is None:
         return None
     if not isinstance(value, dict):
         raise PlanError("palette must be an object")
+    _check_keys(value, _PALETTE_KEYS)
     colors = value.get("colors")
     if not isinstance(colors, list) or not 1 <= len(colors) <= 8:
         raise PlanError("palette.colors must list 1-8 colours")

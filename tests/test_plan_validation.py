@@ -48,17 +48,28 @@ def test_an_effect_past_the_song_end_is_clipped_to_the_last_frame():
     assert result.adjusted["clipped_to_end"] == 1
 
 
-@pytest.mark.parametrize("start, end", [(1000, 1010), (21000, 22000), (2000, 1000)])
-def test_an_empty_span_after_rounding_or_clipping_is_an_error(start, end):
+@pytest.mark.parametrize("start, end", [(1000, 1010), (2000, 1000)])
+def test_an_empty_span_after_rounding_is_an_error(start, end):
     result = _validate(_p(start_ms=start, end_ms=end))
 
     assert result.placements == []
     assert "ends at or before its start" in result.errors[0]
 
 
+@pytest.mark.parametrize("start", [20000, 21000])
+def test_a_placement_starting_at_or_after_the_song_end_says_so(start):
+    result = _validate(_p(start_ms=start, end_ms=22000))
+
+    assert result.placements == []
+    assert "starts after the song ends (last frame 20000 ms)" in result.errors[0]
+
+
 def test_negative_or_non_numeric_times_are_errors():
     assert "start_ms" in _validate(_p(start_ms=-25)).errors[0]
     assert "end_ms" in _validate(_p(end_ms="2s")).errors[0]
+    assert "start_ms" in _validate(_p(start_ms=float("nan"))).errors[0]
+    assert "end_ms" in _validate(_p(end_ms=float("inf"))).errors[0]
+    assert "start_ms" in _validate(_p(start_ms=True)).errors[0]
 
 
 def test_errors_name_the_placement():
@@ -102,6 +113,24 @@ def test_a_submodel_element_is_rejected():
     assert "submodel" in _validate(_p(element="Pipe 1/Top")).errors[0]
 
 
+def test_a_slash_name_without_a_real_parent_model_is_an_unknown_element():
+    error = _validate(_p(element="Nope/Top")).errors[0]
+
+    assert "unknown element 'Nope/Top'" in error and "submodel" not in error
+
+
+def test_a_misspelt_placement_key_is_an_error():
+    error = _validate(_p(pallete={"colors": ["#FFFFFF"]})).errors[0]
+
+    assert "unknown key 'pallete'" in error and "'palette'" in error
+
+
+def test_a_misspelt_palette_key_is_an_error():
+    error = _validate(_p(palette={"colors": ["#FFFFFF"], "brightnes": 50})).errors[0]
+
+    assert "unknown key 'brightnes'" in error and "'brightness'" in error
+
+
 def test_an_unknown_effect_suggests_close_names():
     error = _validate(_p(effect="Colour Wash")).errors[0]
 
@@ -130,6 +159,18 @@ def test_a_raw_settings_string_is_split_on_the_first_equals():
     result = _validate(_p(settings="E_A=1,E_VALUECURVE_B=Active=TRUE|Min=1|"))
 
     assert result.placements[0].settings == {"E_A": "1", "E_VALUECURVE_B": "Active=TRUE|Min=1|"}
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [{"E_A": None}, {"E_A": [1]}, {"E_A": {"x": 1}}, {"E_A": float("nan")}, {"E_A": float("inf")}, {1: "x"}],
+)
+def test_settings_maps_only_take_scalar_values_and_string_keys(settings):
+    assert "settings" in _validate(_p(settings=settings)).errors[0]
+
+
+def test_settings_maps_accept_finite_floats():
+    assert _validate(_p(settings={"E_A": 1.5})).placements[0].settings == {"E_A": "1.5"}
 
 
 @pytest.mark.parametrize("settings", ["E_A=1,oops", "=1", "E_A=1,E_A=2", 5])
