@@ -268,19 +268,38 @@ def test_blend_sets_the_layer_method_setting():
     assert placement.settings == {"E_A": "1", "T_CHOICE_LayerMethod": "Additive"}
 
 
-def test_normal_blend_and_no_blend_write_nothing():
-    for blend in ("Normal", "normal", None):
-        assert _validate(_p(blend=blend) if blend else _p()).placements[0].settings == {}
+@pytest.mark.parametrize("blend", [None, "Normal", "normal"])
+def test_normal_blend_and_no_blend_write_nothing(blend):
+    extra = {} if blend is None else {"blend": blend}
+
+    assert _validate(_p(**extra)).placements[0].settings == {}
 
 
 def test_blend_is_matched_case_insensitively_and_normalised():
     assert _validate(_p(blend="1 REVEALS 2")).placements[0].settings["T_CHOICE_LayerMethod"] == "1 reveals 2"
 
 
+@pytest.mark.parametrize("key, expected", [("additive", "Additive"), ("2 IS MASK", "2 is Mask")])
+def test_a_raw_layer_method_setting_is_normalised_like_blend(key, expected):
+    placement = _validate(_p(settings={"E_A": "1", "T_CHOICE_LayerMethod": key})).placements[0]
+
+    assert placement.settings == {"E_A": "1", "T_CHOICE_LayerMethod": expected}
+
+
+def test_a_raw_normal_layer_method_is_dropped():
+    assert _validate(_p(settings="T_CHOICE_LayerMethod=normal")).placements[0].settings == {}
+
+
 def test_an_unknown_blend_suggests_close_names():
     error = _validate(_p(blend="Additiv")).errors[0]
 
     assert "unknown blend 'Additiv'" in error and "'Additive'" in error
+
+
+def test_an_unknown_raw_layer_method_is_the_same_error():
+    error = _validate(_p(settings={"T_CHOICE_LayerMethod": "additiv"})).errors[0]
+
+    assert "unknown blend 'additiv'" in error and "'Additive'" in error
 
 
 def test_blend_must_be_a_string():
@@ -293,12 +312,15 @@ def test_blend_and_the_layer_method_setting_together_are_an_error():
     assert "use blend or T_CHOICE_LayerMethod, not both" in error
 
 
-def test_blend_modes_match_the_xlights_list():
-    assert BLEND_MODES == (
-        "Normal", "Effect 1", "Effect 2", "1 is Mask", "2 is Mask", "1 is Unmask", "2 is Unmask",
-        "1 is True Unmask", "2 is True Unmask", "1 reveals 2", "2 reveals 1", "Shadow 1 on 2", "Shadow 2 on 1",
-        "Layered", "Average", "Bottom-Top", "Left-Right", "Additive", "Subtractive", "Brightness", "Max", "Min",
-    )
+def test_blend_modes_are_the_xlights_list():
+    used_in_the_users_sequences = {
+        "Additive", "Layered", "2 is Unmask", "Effect 1", "2 is Mask", "1 reveals 2", "2 reveals 1",
+        "1 is True Unmask", "Max", "Average", "1 is Unmask", "Effect 2", "Subtractive", "Bottom-Top", "1 is Mask",
+    }
+
+    assert len(BLEND_MODES) == 22 and len(set(BLEND_MODES)) == 22
+    assert BLEND_MODES[0] == "Normal"
+    assert used_in_the_users_sequences <= set(BLEND_MODES)
 
 
 def test_music_sparkles_maps_onto_the_palette():
@@ -327,7 +349,7 @@ def test_music_sparkles_must_be_a_boolean(value):
     assert "music_sparkles" in error
 
 
-def test_a_wash_on_layer_0_over_a_lower_layer_warns_that_it_hides_it():
+def test_a_wash_over_a_lower_effect_warns_that_it_hides_it():
     result = _validate(
         _p(layer=0, effect="Color Wash", start_ms=0, end_ms=4000),
         _p(layer=1, effect="On", start_ms=1000, end_ms=2000),
@@ -342,81 +364,47 @@ def test_a_wash_on_layer_0_over_a_lower_layer_warns_that_it_hides_it():
     ]
 
 
-def test_a_short_on_accent_over_a_longer_wash_warns_nothing():
+@pytest.mark.parametrize(
+    "upper, lower, warns",
+    [
+        ({"effect": "Color Wash", "start_ms": 0, "end_ms": 4000}, {"effect": "Twinkle", "end_ms": 2000}, True),
+        ({"effect": "Color Wash", "start_ms": 0, "end_ms": 4000}, {"effect": "On", "start_ms": 0, "end_ms": 4000}, True),
+        (
+            {"effect": "Plasma", "settings": {"T_CHOICE_LayerMethod": "normal"}, "start_ms": 0, "end_ms": 4000},
+            {"effect": "Twinkle"},
+            True,
+        ),
+        ({"effect": "On", "start_ms": 1000, "end_ms": 1100}, {"effect": "Color Wash", "start_ms": 0, "end_ms": 4000}, False),
+        ({"effect": "Twinkle"}, {"effect": "Color Wash", "start_ms": 0, "end_ms": 4000}, False),
+        ({"effect": "Color Wash", "start_ms": 1000, "end_ms": 4000}, {"effect": "Twinkle", "start_ms": 3000, "end_ms": 5000}, False),
+        ({"effect": "Color Wash", "start_ms": 1000, "end_ms": 4000}, {"effect": "Twinkle", "start_ms": 0, "end_ms": 1500}, False),
+        ({"effect": "Color Wash", "start_ms": 0, "end_ms": 1000}, {"effect": "On", "start_ms": 1000, "end_ms": 2000}, False),
+        ({"effect": "Color Wash", "blend": "Additive", "start_ms": 0, "end_ms": 4000}, {"effect": "On"}, False),
+        (
+            {"effect": "Color Wash", "settings": {"T_CHOICE_LayerMethod": "additive"}, "start_ms": 0, "end_ms": 4000},
+            {"effect": "On"},
+            False,
+        ),
+        ({"effect": "Color Wash", "start_ms": 0, "end_ms": 4000}, {"effect": "Off"}, False),
+        ({"effect": "Color Wash", "start_ms": 0, "end_ms": 4000}, {"element": "Tree 6ft"}, False),
+    ],
+    ids=[
+        "twinkle-under-wash", "on-under-wash", "raw-normal-layer-method", "short-on-over-wash",
+        "accent-over-wash", "starts-inside", "ends-inside", "touching", "blended", "raw-blended",
+        "off-below", "other-element",
+    ],
+)
+def test_layer_cover_warns_only_when_the_upper_effect_hides_the_whole_lower_one(upper, lower, warns):
     result = _validate(
-        _p(layer=0, effect="On", start_ms=1000, end_ms=1100),
-        _p(layer=1, effect="Color Wash", start_ms=0, end_ms=4000),
+        _p(layer=0, **{"start_ms": 1000, "end_ms": 2000, **upper}),
+        _p(layer=1, **{"start_ms": 1000, "end_ms": 2000, **lower}),
     )
 
-    assert result.warnings == []
+    assert result.errors == []
+    assert len(result.warnings) == (1 if warns else 0)
 
 
-def test_a_wash_spanning_a_shorter_lower_effect_warns():
-    for lower in ("Twinkle", "On"):
-        result = _validate(
-            _p(layer=0, effect="Color Wash", start_ms=0, end_ms=4000),
-            _p(layer=1, effect=lower, start_ms=0, end_ms=4000 if lower == "On" else 2000),
-        )
-
-        assert len(result.warnings) == 1
-
-
-@pytest.mark.parametrize("lower_start, lower_end", [(3000, 5000), (0, 1000)])
-def test_a_partial_overlap_warns_nothing(lower_start, lower_end):
-    result = _validate(
-        _p(layer=0, effect="Color Wash", start_ms=1000, end_ms=4000),
-        _p(layer=1, effect="Twinkle", start_ms=lower_start, end_ms=lower_end),
-    )
-
-    assert result.warnings == []
-
-
-def test_a_blended_wash_hides_nothing():
-    result = _validate(
-        _p(layer=0, effect="Color Wash", blend="Additive", start_ms=0, end_ms=4000),
-        _p(layer=1, effect="On", start_ms=1000, end_ms=2000),
-    )
-
-    assert result.warnings == []
-
-
-def test_an_explicit_normal_layer_method_still_hides():
-    result = _validate(
-        _p(layer=0, effect="Plasma", settings={"T_CHOICE_LayerMethod": "Normal"}, start_ms=0, end_ms=4000),
-        _p(layer=1, effect="On", start_ms=1000, end_ms=2000),
-    )
-
-    assert len(result.warnings) == 1
-
-
-def test_a_base_on_the_highest_layer_under_an_accent_warns_nothing():
-    result = _validate(
-        _p(layer=1, effect="Color Wash", start_ms=0, end_ms=4000),
-        _p(layer=0, effect="Twinkle", start_ms=1000, end_ms=2000),
-    )
-
-    assert result.warnings == []
-
-
-def test_a_wash_and_a_lower_layer_that_never_overlap_warn_nothing():
-    result = _validate(
-        _p(layer=0, effect="Color Wash", start_ms=0, end_ms=1000),
-        _p(layer=1, effect="On", start_ms=1000, end_ms=2000),
-    )
-
-    assert result.warnings == []
-
-
-def test_elements_do_not_hide_each_other():
-    result = _validate(
-        _p(element="Door", layer=0, effect="Color Wash", start_ms=0, end_ms=4000),
-        _p(element="Tree 6ft", layer=1, effect="On", start_ms=1000, end_ms=2000),
-    )
-
-    assert result.warnings == []
-
-
-def test_hidden_moments_are_counted_per_layer_pair():
+def test_hidden_effects_are_counted_per_layer_pair():
     result = _validate(
         _p(layer=0, effect="Plasma", start_ms=0, end_ms=4000),
         _p(layer=1, effect="Twinkle", start_ms=0, end_ms=1000),

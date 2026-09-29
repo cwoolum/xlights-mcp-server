@@ -6,9 +6,10 @@ import difflib
 import math
 import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
+from typing import TypeVar
 
 from xlights_mcp.sequencer.timing import last_frame_ms, to_frame
 from xlights_mcp.xlights.layout import contained_elements
@@ -24,6 +25,7 @@ BLEND_MODES: tuple[str, ...] = (
     "Layered", "Average", "Bottom-Top", "Left-Right", "Additive", "Subtractive", "Brightness", "Max", "Min",
 )
 LAYER_METHOD_KEY = "T_CHOICE_LayerMethod"
+_BLEND_BY_LOWER = {mode.lower(): mode for mode in BLEND_MODES}
 _PLACEMENT_KEYS = ("element", "layer", "effect", "start_ms", "end_ms", "settings", "palette", "blend")
 _PALETTE_KEYS = ("colors", "brightness", "sparkles", "music_sparkles")
 WARNINGS_LISTED = 10
@@ -32,6 +34,7 @@ _EFFECT_HINTS = {
     "chase": ("SingleStrand", " (Chase is a SingleStrand mode: E_NOTEBOOK_SSEFFECT_TYPE=Chase)"),
     "vumeter": ("VU Meter", ""),
 }
+_K = TypeVar("_K")
 _HEX_COLOUR = re.compile(r"#[0-9A-Fa-f]{6}")
 
 
@@ -64,9 +67,13 @@ def validate_plan(
         result.adjusted["rounded_to_frame"] += rounded
         result.adjusted["clipped_to_end"] += clipped
         indexed.append((i, placement))
+        palette = placement.palette
+        if palette and palette.music_sparkles and palette.sparkle_frequency == 0:
+            result.warnings.append(
+                f"placement {i}{_describe(raw)}: music_sparkles has no effect while sparkles is 0"
+            )
     result.errors.extend(_overlaps(indexed))
     result.placements = [p for _, p in indexed]
-    result.warnings.extend(_music_sparkle_warnings(plan, indexed))
     result.warnings.extend(_parent_child_warnings(result.placements, show))
     result.warnings.extend(_layer_cover_warnings(result.placements))
     return result
@@ -204,18 +211,19 @@ def _settings_text(key, value) -> str:
 
 
 def _with_blend(settings: dict[str, str], blend) -> dict[str, str]:
-    if blend is None:
-        return settings
-    if not isinstance(blend, str):
-        raise PlanError(f"blend must be one of {', '.join(BLEND_MODES)}, got {blend!r}")
-    canonical = {mode.lower(): mode for mode in BLEND_MODES}.get(blend.lower())
-    if canonical is None:
-        raise PlanError(f"unknown blend {blend!r}{_suggest(blend, BLEND_MODES)}")
-    if LAYER_METHOD_KEY in settings:
+    raw = settings.get(LAYER_METHOD_KEY)
+    if blend is not None and raw is not None:
         raise PlanError(f"use blend or {LAYER_METHOD_KEY}, not both")
-    if canonical == "Normal":
+    chosen = blend if blend is not None else raw
+    if chosen is None:
         return settings
-    return {**settings, LAYER_METHOD_KEY: canonical}
+    if not isinstance(chosen, str):
+        raise PlanError(f"blend must be one of {', '.join(BLEND_MODES)}, got {chosen!r}")
+    canonical = _BLEND_BY_LOWER.get(chosen.lower())
+    if canonical is None:
+        raise PlanError(f"unknown blend {chosen!r}{_suggest(chosen, BLEND_MODES)}")
+    rest = {key: value for key, value in settings.items() if key != LAYER_METHOD_KEY}
+    return rest if canonical == "Normal" else {**rest, LAYER_METHOD_KEY: canonical}
 
 
 def _palette(value) -> ColorPalette | None:
@@ -272,67 +280,66 @@ def _overlaps(indexed: list[tuple[int, EffectPlacement]]) -> list[str]:
     return errors
 
 
-def _parent_child_warnings(placements: list[EffectPlacement], show: ShowConfig) -> list[str]:
-    lit: dict[str, list[tuple[int, int]]] = defaultdict(list)
+def _lit_by_element(placements: list[EffectPlacement]) -> dict[str, list[EffectPlacement]]:
+    lit: dict[str, list[EffectPlacement]] = defaultdict(list)
     for p in placements:
         if p.effect_name != "Off":
-            lit[p.model_name].append((p.start_time_ms, p.end_time_ms))
+            lit[p.model_name].append(p)
+    return lit
+
+
+def _parent_child_warnings(placements: list[EffectPlacement], show: ShowConfig) -> list[str]:
+    lit = _lit_by_element(placements)
     counts: dict[tuple[str, str], int] = {}
     for parent, members in contained_elements(show).items():
         if parent not in lit:
             continue
         for child in members & lit.keys():
-            n = sum(1 for s1, e1 in lit[parent] for s2, e2 in lit[child] if s1 < e2 and s2 < e1)
+            n = sum(
+                1 for a in lit[parent] for b in lit[child]
+                if a.start_time_ms < b.end_time_ms and b.start_time_ms < a.end_time_ms
+            )
             if n:
                 counts[(parent, child)] = n
-    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     return _listed(
-        [
-            f"{n} moment{'s' if n != 1 else ''} where {parent} and {child} are both lit"
-            for (parent, child), n in ranked
-        ],
-        "... and {extra} more parent/child pair{s} lit together",
+        counts,
+        lambda pair, n: f"{_plural(n, 'moment')} where {pair[0]} and {pair[1]} are both lit",
+        lambda extra: f"... and {_plural(extra, 'more parent/child pair')} lit together",
     )
 
 
 def _layer_cover_warnings(placements: list[EffectPlacement]) -> list[str]:
-    by_element: dict[str, list[EffectPlacement]] = defaultdict(list)
-    for p in placements:
-        if p.effect_name != "Off":
-            by_element[p.model_name].append(p)
-    counts: dict[tuple[str, int, int], int] = {}
-    first_effect: dict[tuple[str, int, int], str] = {}
-    for element, items in by_element.items():
-        for p in items:
-            if p.effect_name not in FULL_COVERAGE_EFFECTS or p.settings.get(LAYER_METHOD_KEY, "Normal") != "Normal":
-                continue
-            for q in items:
-                if q.layer > p.layer and p.start_time_ms <= q.start_time_ms and q.end_time_ms <= p.end_time_ms:
-                    key = (element, p.layer, q.layer)
-                    counts[key] = counts.get(key, 0) + 1
-                    first_effect.setdefault(key, p.effect_name)
-    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    covers: dict[tuple[str, int, int], list[str]] = defaultdict(list)
+    for element, items in _lit_by_element(placements).items():
+        bases = [p for p in items if p.effect_name in FULL_COVERAGE_EFFECTS and LAYER_METHOD_KEY not in p.settings]
+        for base in bases:
+            for below in items:
+                if (
+                    below.layer > base.layer
+                    and base.start_time_ms <= below.start_time_ms
+                    and below.end_time_ms <= base.end_time_ms
+                ):
+                    covers[(element, base.layer, below.layer)].append(base.effect_name)
     return _listed(
-        [
-            f"{n} effect{'s' if n != 1 else ''} on {key[0]} layer {key[2]} completely hidden by "
-            f"{first_effect[key]} on layer {key[1]} "
+        {key: len(effects) for key, effects in covers.items()},
+        lambda key, n: (
+            f"{_plural(n, 'effect')} on {key[0]} layer {key[2]} completely hidden by "
+            f"{covers[key][0]} on layer {key[1]} "
             "(layer 0 is drawn on top: put bases on the highest layer, or give the upper effect a blend)"
-            for key, n in ranked
-        ],
-        "... and {extra} more hidden layer pair{s}",
+        ),
+        lambda extra: f"... and {_plural(extra, 'more hidden layer pair')}",
     )
 
 
-def _listed(lines: list[str], overflow: str) -> list[str]:
-    extra = len(lines) - WARNINGS_LISTED
-    if extra <= 0:
-        return lines
-    return [*lines[:WARNINGS_LISTED], overflow.format(extra=extra, s="s" if extra != 1 else "")]
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'s' if n != 1 else ''}"
 
 
-def _music_sparkle_warnings(plan: list[object], indexed: list[tuple[int, EffectPlacement]]) -> list[str]:
-    return [
-        f"placement {i}{_describe(plan[i])}: music_sparkles has no effect while sparkles is 0"
-        for i, p in indexed
-        if p.palette and p.palette.music_sparkles and p.palette.sparkle_frequency == 0
-    ]
+def _listed(
+    counts: dict[_K, int], line: Callable[[_K, int], str], overflow: Callable[[int], str]
+) -> list[str]:
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    lines = [line(key, n) for key, n in ranked[:WARNINGS_LISTED]]
+    if len(ranked) > WARNINGS_LISTED:
+        lines.append(overflow(len(ranked) - WARNINGS_LISTED))
+    return lines
