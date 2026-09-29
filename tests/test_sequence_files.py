@@ -44,6 +44,29 @@ def test_latest_hand_made_sequence_skips_generated_files(tmp_path):
     assert latest_hand_made_sequence(tmp_path) == newest
 
 
+def _typed(path: Path, sequence_type: str, mtime: float) -> Path:
+    path.write_text(
+        f"<xsequence><head><sequenceType>{sequence_type}</sequenceType></head><ElementEffects/></xsequence>",
+        encoding="utf-8",
+    )
+    os.utime(path, (mtime, mtime))
+    return path
+
+
+def test_latest_hand_made_sequence_prefers_a_song_over_a_newer_animation(tmp_path):
+    song = _typed(tmp_path / "Song.xsq", "Media", mtime=1_000_000)
+    _typed(tmp_path / "Standby.xsq", "Animation", mtime=2_000_000)
+
+    assert latest_hand_made_sequence(tmp_path) == song
+
+
+def test_latest_hand_made_sequence_falls_back_to_the_newest_animation(tmp_path):
+    _typed(tmp_path / "Old.xsq", "Animation", mtime=1_000_000)
+    newest = _typed(tmp_path / "New.xsq", "Animation", mtime=2_000_000)
+
+    assert latest_hand_made_sequence(tmp_path) == newest
+
+
 def test_latest_hand_made_sequence_is_none_without_one(tmp_path):
     _generated(tmp_path / "Gen.xsq")
 

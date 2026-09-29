@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from xlights_mcp.xlights.xsq_writer import is_generated_sequence
 logger = logging.getLogger(__name__)
 
 _HEAD_BYTES = 4096
+_MEDIA_TYPE = re.compile(rb"<sequenceType>\s*Media\s*</sequenceType>")
 
 
 class EffectSummary(BaseModel):
@@ -183,16 +185,26 @@ def is_generated_file(xsq_path: Path) -> bool:
         return is_generated_sequence(f.read(_HEAD_BYTES))
 
 
+def _is_media_sequence(xsq_path: Path) -> bool:
+    with open(xsq_path, "rb") as f:
+        return _MEDIA_TYPE.search(f.read(_HEAD_BYTES)) is not None
+
+
 def latest_hand_made_sequence(show_path: Path) -> Path | None:
-    """The most recently modified .xsq in the folder that this server didn't generate."""
+    """The newest .xsq this server didn't generate, preferring song (Media) sequences over animations."""
     hand_made: list[tuple[float, Path]] = []
+    media: list[tuple[float, Path]] = []
     for path in show_path.glob("*.xsq"):
         try:
-            if path.is_file() and not is_generated_file(path):
-                hand_made.append((path.stat().st_mtime, path))
+            if not path.is_file() or is_generated_file(path):
+                continue
+            entry = (path.stat().st_mtime, path)
+            hand_made.append(entry)
+            if _is_media_sequence(path):
+                media.append(entry)
         except OSError:
             continue
-    latest = max(hand_made, default=None)
+    latest = max(media or hand_made, default=None)
     return latest[1] if latest else None
 
 
