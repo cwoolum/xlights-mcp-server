@@ -343,7 +343,9 @@ def profile_sequence(xsq_path: str) -> dict:
       inside it is also lit (how often parents act as a base under their children)
     - overlaps_within_layer: overlapping effects on one element layer (hand-made sequences have 0)
     - elements: per element (the 20 busiest), its layers, effect count, median effect length,
-      share of the song lit and top effect names; other_elements summarises the rest
+      share of the song lit and top effect names; other_elements summarises the rest.
+      effects includes effects on strands, nodes and submodels, and sub_effects counts those
+      (layers lists only the element's own effect layers)
 
     Args:
         xsq_path: The sequence file; a name or relative path resolves against the active show
