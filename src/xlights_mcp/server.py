@@ -282,7 +282,7 @@ def list_sequences() -> dict:
     """List all sequences (.xsq files) in the active show folder.
 
     `generated` is true for sequences written by create_sequence/write_sequence, false for
-    hand-made ones. `modified` is the file's last-modified time.
+    hand-made ones, and null when the file can't be read. `modified` is the file's last-modified time.
     """
     from xlights_mcp.xlights.xsq_reader import is_generated_file
 
@@ -292,17 +292,16 @@ def list_sequences() -> dict:
         return show_path
 
     sequences = []
-    for xsq in sorted(show_path.glob("*.xsq")):
-        sequences.append(
-            {
-                "name": xsq.stem,
-                "path": str(xsq),
-                "generated": is_generated_file(xsq),
-                "modified": datetime.fromtimestamp(xsq.stat().st_mtime, tz=UTC)
-                .astimezone()
-                .isoformat(timespec="seconds"),
-            }
-        )
+    for xsq in sorted(p for p in show_path.glob("*.xsq") if p.is_file()):
+        try:
+            generated = is_generated_file(xsq)
+        except OSError:
+            generated = None
+        try:
+            modified = datetime.fromtimestamp(xsq.stat().st_mtime, tz=UTC).astimezone().isoformat(timespec="seconds")
+        except OSError:
+            modified = None
+        sequences.append({"name": xsq.stem, "path": str(xsq), "generated": generated, "modified": modified})
     return {
         "show": config.active_show,
         "sequence_count": len(sequences),

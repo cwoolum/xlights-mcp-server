@@ -10,6 +10,7 @@ from show_fixtures import call_tool
 
 from xlights_mcp import server as server_module
 from xlights_mcp.config import ServerConfig
+from xlights_mcp.xlights import xsq_reader
 from xlights_mcp.xlights.models import ShowConfig
 from xlights_mcp.xlights.xsq_reader import is_generated_file, latest_hand_made_sequence
 from xlights_mcp.xlights.xsq_writer import SequenceSpec, write_xsq
@@ -68,10 +69,46 @@ async def test_list_sequences_flags_generated_sequences(active_show):
     assert all(s["modified"] for s in payload["sequences"])
 
 
-async def test_inspect_sequence_accepts_a_name_with_or_without_the_extension(active_show):
+@pytest.mark.parametrize("stem", ["Hand", "Mr. Sandman"])
+async def test_inspect_sequence_accepts_a_name_with_or_without_the_extension(active_show, stem):
+    _hand_made(active_show / f"{stem}.xsq")
+
+    by_name = await call_tool("inspect_sequence", {"sequence_name": stem})
+    by_file = await call_tool("inspect_sequence", {"sequence_name": f"{stem}.xsq"})
+
+    assert by_name["file_name"] == by_file["file_name"] == f"{stem}.xsq"
+
+
+def test_latest_hand_made_sequence_ignores_directories_and_unreadable_files(tmp_path, monkeypatch):
+    (tmp_path / "Folder.xsq").mkdir()
+    readable = _hand_made(tmp_path / "Readable.xsq", mtime=1_000_000)
+    _hand_made(tmp_path / "Locked.xsq", mtime=2_000_000)
+    real = xsq_reader.is_generated_file
+
+    def flaky(path):
+        if path.name == "Locked.xsq":
+            raise PermissionError(path)
+        return real(path)
+
+    monkeypatch.setattr(xsq_reader, "is_generated_file", flaky)
+
+    assert latest_hand_made_sequence(tmp_path) == readable
+
+
+async def test_list_sequences_skips_directories_and_marks_unreadable_files(active_show, monkeypatch):
+    (active_show / "Folder.xsq").mkdir()
     _hand_made(active_show / "Hand.xsq")
+    _hand_made(active_show / "Locked.xsq")
+    real = xsq_reader.is_generated_file
 
-    by_name = await call_tool("inspect_sequence", {"sequence_name": "Hand"})
-    by_file = await call_tool("inspect_sequence", {"sequence_name": "Hand.xsq"})
+    def flaky(path):
+        if path.name == "Locked.xsq":
+            raise PermissionError(path)
+        return real(path)
 
-    assert by_name["file_name"] == by_file["file_name"] == "Hand.xsq"
+    monkeypatch.setattr(xsq_reader, "is_generated_file", flaky)
+
+    payload = await call_tool("list_sequences", {})
+
+    flags = {s["name"]: s["generated"] for s in payload["sequences"]}
+    assert flags == {"Hand": False, "Locked": None}

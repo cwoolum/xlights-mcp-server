@@ -185,8 +185,15 @@ def is_generated_file(xsq_path: Path) -> bool:
 
 def latest_hand_made_sequence(show_path: Path) -> Path | None:
     """The most recently modified .xsq in the folder that this server didn't generate."""
-    hand_made = [p for p in show_path.glob("*.xsq") if not is_generated_file(p)]
-    return max(hand_made, key=lambda p: p.stat().st_mtime, default=None)
+    hand_made: list[tuple[float, Path]] = []
+    for path in show_path.glob("*.xsq"):
+        try:
+            if path.is_file() and not is_generated_file(path):
+                hand_made.append((path.stat().st_mtime, path))
+        except OSError:
+            continue
+    latest = max(hand_made, default=None)
+    return latest[1] if latest else None
 
 
 def _text(parent: ET.Element, tag: str, default: str = "") -> str:
