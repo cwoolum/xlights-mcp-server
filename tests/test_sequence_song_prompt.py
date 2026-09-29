@@ -124,3 +124,30 @@ async def test_unreadable_show_notes_are_left_out(active_show, make_notes):
     text = await _get({"mp3_path": "Song.mp3"})
 
     assert "Show notes" not in text and "Sequence Song.mp3" in text
+
+
+def test_layer_zero_is_said_to_draw_on_top():
+    text = render_sequence_song("Song.mp3", None, None)
+
+    assert "Layer 0 is drawn on top" in text
+    assert "bases (wash, Plasma, solid colour) on the highest layer" in text
+    assert "most elements need only layer 0" not in text
+
+
+def test_blend_modes_are_explained():
+    text = render_sequence_song("Song.mp3", None, None)
+
+    assert '`"blend"`' in text
+    assert all(f"`{mode}`" in text for mode in ("Additive", "1 reveals 2", "Max", "Layered"))
+
+
+def test_value_curves_are_explained_in_real_units():
+    text = render_sequence_song("Song.mp3", None, None)
+
+    assert "E_VALUECURVE_<setting>" in text and "RV=TRUE" in text
+    assert "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|Type=Ramp" in text
+    assert "not percentages" in text
+
+
+def test_music_sparkles_are_offered_on_palettes():
+    assert "`music_sparkles: true`" in render_sequence_song("Song.mp3", None, None)

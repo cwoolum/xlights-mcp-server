@@ -697,14 +697,21 @@ async def write_sequence(
 ) -> dict:
     """Validate an effect plan against the active show and the song, then write it as an .xsq.
 
-    Each placement: {"element", "layer", "effect", "start_ms", "end_ms", "settings", "palette"}.
+    Each placement: {"element", "layer", "effect", "start_ms", "end_ms", "settings", "palette",
+    "blend"}.
     - element: a model or group name (list_models / get_show_layout); submodels aren't supported.
-    - layer: 0-2 (default 0). effect: an xLights effect name (list_effects, or any effect
-      already used in this show's sequences).
+    - layer: 0-2 (default 0; 0 is drawn on top). effect: an xLights effect name (list_effects, or
+      any effect already used in this show's sequences).
+    - blend: how the placement mixes with the layers below it (default "Normal"). One of Normal,
+      Effect 1, Effect 2, 1 is Mask, 2 is Mask, 1 is Unmask, 2 is Unmask, 1 is True Unmask,
+      2 is True Unmask, 1 reveals 2, 2 reveals 1, Shadow 1 on 2, Shadow 2 on 1, Layered, Average,
+      Bottom-Top, Left-Right, Additive, Subtractive, Brightness, Max, Min (any case). It sets
+      T_CHOICE_LayerMethod, so don't also put that key in settings.
     - settings: {key: value} (values must be strings, numbers or booleans, and can't contain
       commas) or a raw "K=V,K=V" string.
     - palette: {"colors": ["#RRGGBB", ...] (1-8), "brightness": 0-400 (default 100),
-      "sparkles": 0-200 (default 0)}; omitted means a white palette.
+      "sparkles": 0-200 (default 0), "music_sparkles": true|false (default false)}; omitted
+      means a white palette.
 
     Times are rounded to the 25 ms frame grid and clipped to the song end (counted under
     "adjusted"). Any error writes nothing: overlapping placements on the same element and layer,
@@ -713,7 +720,10 @@ async def write_sequence(
     misspelt "pallete"), malformed settings or palette, an unknown or duplicate timing track (a
     timing track can't share a name with a model or group), an invalid name, or an existing file
     without overwrite. A group lit while a group or model inside it is also lit
-    is a warning. The report lists at most 50 errors.
+    is a warning, and so is a Color Wash, Plasma or On with Normal blending on a layer above
+    another layer of the same element while they overlap (it hides that layer: put bases on the
+    highest layer or give the upper effect a blend). The report lists at most 50 errors. Only the
+    elements the plan uses are written, and the file carries the installed xLights version.
 
     Args:
         mp3_path: The song; analysed first when it isn't cached (like get_beat_map)

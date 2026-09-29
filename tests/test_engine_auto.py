@@ -225,6 +225,9 @@ def test_faces_are_sequenced_and_groups_holding_them_left_out(click_track, singi
     assert not any(e.get("name") == "On" for e in elements["Lantern2"])
     assert not elements.get("Lanterns") and not elements.get("Everything Flat")
     assert "Vocals" in result["timing_tracks"]
+    layers = ET.parse(result["output_path"]).getroot().findall("ElementEffects/Element[@name='Lantern2']/EffectLayer")
+    assert [e.get("name") for e in layers[0]] == ["Faces"]
+    assert layers[1] and "Faces" not in {e.get("name") for e in layers[1]}
 
 
 @pytest.mark.parametrize(

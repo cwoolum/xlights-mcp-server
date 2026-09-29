@@ -349,9 +349,9 @@ def _face_placements(
             key = "ColorWash_slow"
         else:
             key = FACE_BED_KEYS[index % len(FACE_BED_KEYS)]
-        plan.append(_placement(model, 0, key, *span, palette))
+        plan.append(_placement(model, 1, key, *span, palette))
     plan.append({
-        "element": model, "layer": 1, "effect": "Faces", "start_ms": 0, "end_ms": song_end,
+        "element": model, "layer": 0, "effect": "Faces", "start_ms": 0, "end_ms": song_end,
         "settings": {
             "E_CHECKBOX_Faces_Outline": "1",
             "E_CHOICE_Faces_EyeBlinkDuration": "Normal",

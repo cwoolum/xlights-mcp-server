@@ -28,10 +28,10 @@ Call `get_show_layout`. Every group has a tier:
 ## 4. Plan section by section
 
 For each section, decide what carries it:
-- **Wash base:** use a wash group as a base only where the section's energy and the reference call for it, such as quiet intros or big drops.
+- **Wash group:** use a wash group only where the section's energy and the reference call for it, such as quiet intros or big drops. Under features, keep it dimmed.
 - **Rotation:** rotate which feature groups carry motion between sections and phrases, and don't light everything at once. Match the reference's concurrency and dark share.
 - **Accents:** put short accents (20–200 ms) on accent props at hits, for example drum onsets in a drop, or downbeats in a chorus.
-- **Energy:** build energy with effect speed, density and brightness, not by stacking layers. Use at most 3 layers (0–2) per element; most elements need only layer 0.
+- **Energy:** build energy with effect speed, density and brightness, not by stacking layers. Use at most 3 layers (0–2). **Layer 0 is drawn on top**: put accents on layer 0 and bases (wash, Plasma, solid colour) on the highest layer you use. `write_sequence` warns when a base on a top layer hides what's below.
 - **Parents and children:** a group lit at the same time as a group or model inside it reads as one element, and the writer warns about it. Do it on purpose (a dim parent base under a bright child), not by accident.
 - **Overlaps:** effects on the same element and layer must not overlap. End one where the next starts.
 
@@ -51,7 +51,15 @@ A placement looks like this:
 - **VU Meter synced to a timing track:** `E_CHOICE_VUMeter_Type` = `Timing Event Color` and `E_CHOICE_VUMeter_TimingTrack` = `Beats`.
 - **Fades:** `T_TEXTCTRL_Fadein` and `T_TEXTCTRL_Fadeout`, in seconds.
 
-`palette` takes 1–8 `#RRGGBB` colours, a `brightness` of 0–400 (default 100) and `sparkles` of 0–200. Without a palette, the effect is white.
+**Blending.** `"blend"` on a placement sets how it mixes with the layers below it (default `Normal`):
+- `Additive` for white or same-hue accents;
+- `1 reveals 2` for coloured hits that must keep their colour (additive red over cyan renders white);
+- `Max` for texture over texture;
+- `Layered` fills the dark areas of the layer below.
+
+**Value curves.** A ramp goes in an effect's `E_VALUECURVE_<setting>` key. With `RV=TRUE`, P1, P2, Min and Max are real values in the setting's units, not percentages: Wave speed is ×100 (Max 5000), and palette brightness runs 0–400. A brightness ramp inside one effect goes in `settings` as `C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|Type=Ramp|Min=0.00|Max=400.00|P1=100.00|P2=300.00|RV=TRUE|`. Copy working strings from the user's own sequences when you can.
+
+`palette` takes 1–8 `#RRGGBB` colours, a `brightness` of 0–400 (default 100), `sparkles` of 0–200, and `music_sparkles: true` for music-reactive sparkles. Without a palette, the effect is white.
 
 For a long plan, write the placements to a JSON file in the show folder and pass `plan_path` instead of `plan`.
 

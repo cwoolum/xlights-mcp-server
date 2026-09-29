@@ -180,7 +180,8 @@ def test_a_section_starting_in_the_last_frame_is_skipped():
 def test_face_backgrounds_skip_a_section_starting_in_the_last_frame():
     plan = _face_placements(LAST_FRAME_SECTION, "Lantern2", "Singing Face", "Vocals", COLORS)
 
-    assert [(p["effect"], p["start_ms"], p["end_ms"]) for p in plan if p["layer"] == 0] == [("Twinkle", 0, 10000)]
+    assert [(p["effect"], p["start_ms"], p["end_ms"]) for p in plan if p["layer"] == 1] == [("Twinkle", 0, 10000)]
+    assert [p["effect"] for p in plan if p["layer"] == 0] == ["Faces"]
     assert validate_plan(plan, SHOW, LAST_FRAME_SECTION.duration_ms, XLIGHTS_EFFECT_NAMES).errors == []
 
 
