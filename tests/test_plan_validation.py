@@ -137,6 +137,21 @@ def test_an_unknown_effect_suggests_close_names():
     assert "unknown effect 'Colour Wash'" in error and "'Color Wash'" in error
 
 
+def test_chase_points_at_singlestrand_not_a_lookalike():
+    error = _validate(_p(effect="Chase")).errors[0]
+
+    assert "unknown effect 'Chase'; did you mean 'SingleStrand'?" in error
+    assert "E_NOTEBOOK_SSEFFECT_TYPE=Chase" in error
+    assert "Shape" not in error
+
+
+def test_other_effect_aliases_suggest_their_target():
+    error = _validate(_p(effect="ColorWash")).errors[0]
+
+    assert "unknown effect 'ColorWash'; did you mean 'Color Wash'?" in error
+    assert "SingleStrand" not in error
+
+
 def test_effect_names_come_from_the_given_set():
     result = validate_plan([_p(effect="Custom Thing")], SHOW, 20000, XLIGHTS_EFFECT_NAMES | {"Custom Thing"})
 

@@ -20,7 +20,15 @@ MAX_LAYER = 2
 _PLACEMENT_KEYS = ("element", "layer", "effect", "start_ms", "end_ms", "settings", "palette")
 _PALETTE_KEYS = ("colors", "brightness", "sparkles")
 PARENT_CHILD_PAIRS_LISTED = 10
-_HEX_COLOUR = re.compile(r"#[0-9A-Fa-f]{6}")
+_EFFECT_ALIASES = {
+    "chase": "SingleStrand",
+    "colorwash": "Color Wash",
+    "color_wash": "Color Wash",
+    "vumeter": "VU Meter",
+    "single strand": "SingleStrand",
+}
+_CHASE_NOTE = " (Chase is a SingleStrand mode: E_NOTEBOOK_SSEFFECT_TYPE=Chase)"
+_HEX_COLOUR =re.compile(r"#[0-9A-Fa-f]{6}")
 
 
 class PlanError(ValueError):
@@ -123,6 +131,10 @@ def _effect(name, effect_names: AbstractSet[str]) -> str:
         raise PlanError("effect is required")
     if name in effect_names:
         return name
+    alias = _EFFECT_ALIASES.get(name.lower())
+    if alias in effect_names:
+        note = _CHASE_NOTE if name.lower() == "chase" else ""
+        raise PlanError(f"unknown effect {name!r}; did you mean {alias!r}?{note}")
     raise PlanError(f"unknown effect {name!r}{_suggest(name, effect_names)}")
 
 
