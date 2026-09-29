@@ -7,10 +7,11 @@ from collections.abc import Sequence
 
 from xlights_mcp.audio.analyzer import SongAnalysis
 from xlights_mcp.audio.drums import BEATS_PER_BAR
+from xlights_mcp.audio.silences import kicks
 from xlights_mcp.xlights.xsq_writer import FRAME_MS, TimingTrack, TimingTrackLabel
 
 _STEM_TRACKS = {"Drums": "drums", "Bass": "bass", "Instruments": "other"}
-STEM_TRACK_NAMES = tuple(_STEM_TRACKS)
+STEM_TRACK_NAMES = (*_STEM_TRACKS, "Kicks")
 TIMING_TRACK_NAMES = ("Beats", "Bars", *STEM_TRACK_NAMES)
 _DOWNBEAT_TOLERANCE_S = 0.05
 
@@ -74,6 +75,16 @@ def build_timing_tracks(
         elif name == "Bars":
             bars = analysis.beats.downbeat_times
             marks = _marks(bars, [str(i + 1) for i in range(len(bars))], end_ms)
+        elif name == "Kicks":
+            try:
+                kick_times = kicks(analysis)
+            except ValueError as e:
+                warnings.append(f"Kicks timing track skipped: {e}")
+                continue
+            if not kick_times:
+                warnings.append("Kicks timing track skipped: no kick hits in the drum stem")
+                continue
+            marks = _marks(kick_times, ["x"] * len(kick_times), end_ms)
         elif name in _STEM_TRACKS:
             stem_name = _STEM_TRACKS[name]
             stem = analysis.stem_analysis.stems.get(stem_name) if analysis.stem_analysis.available else None

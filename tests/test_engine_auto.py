@@ -8,11 +8,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from drum_fixtures import make_drum_stem
 from show_fixtures import make_analysis
 
 from xlights_mcp.audio.cache import save_cached
 from xlights_mcp.audio.lyrics import LyricTrack, LyricWord, PhonemeEvent
 from xlights_mcp.audio.sections import SongSection
+from xlights_mcp.audio.stems_model import StemAnalysis
 from xlights_mcp.config import AudioConfig
 from xlights_mcp.sequencer import engine
 from xlights_mcp.sequencer.engine import generate_sequence
@@ -33,6 +35,25 @@ def audio(tmp_path: Path, click_track: Path) -> AudioConfig:
     )
     save_cached(analysis, click_track, config.cache_dir)
     return config
+
+
+def test_the_baseline_adds_a_kicks_track_when_stems_are_available(click_track, show_copy, audio):
+    analysis = make_analysis(
+        20.0,
+        np.arange(0, 20, 0.5).tolist(),
+        np.arange(0, 20, 2.0).tolist(),
+        path=click_track,
+        sections=[SongSection(label="chorus", start_time=0.0, end_time=20.0, energy_level=0.8)],
+        stem_analysis=StemAnalysis(
+            available=True, stems={"drums": make_drum_stem([(0, 8), (12, 20)], duration=20.0)}
+        ),
+    )
+    save_cached(analysis, click_track, audio.cache_dir)
+
+    result = _generate(click_track, show_copy, audio)
+
+    assert "Kicks" in result["timing_tracks"]
+    assert not [w for w in result["warnings"] if "Kicks" in w]
 
 
 def _generate(click_track, show, audio, **kw) -> dict:

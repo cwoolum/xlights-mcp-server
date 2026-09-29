@@ -10,6 +10,7 @@ from typing import Literal, NamedTuple
 from xlights_mcp.audio.analyzer import ProgressCallback, SongAnalysis, full_analysis
 from xlights_mcp.audio.lyrics import LyricTrack
 from xlights_mcp.audio.sections import SongSection
+from xlights_mcp.audio.silences import kicks, nearest_kick
 from xlights_mcp.config import AudioConfig
 from xlights_mcp.sequencer.plan_writer import write_plan
 from xlights_mcp.sequencer.timing import STEM_TRACK_NAMES, last_frame_ms, to_frame
@@ -616,6 +617,10 @@ def _baseline_placements(analysis: SongAnalysis, cast: _Cast, colors: list[str])
     halves = [cast.features[:split], cast.features[split:]]
     palette = {"colors": colors}
     song_end = last_frame_ms(analysis.duration_ms)
+    try:
+        kick_times = kicks(analysis)
+    except ValueError:
+        kick_times = []
 
     plan: list[dict] = []
     feature_turn = accent_turn = 0
@@ -645,7 +650,8 @@ def _baseline_placements(analysis: SongAnalysis, cast: _Cast, colors: list[str])
             pool = [p for p in cast.accent_pool if p not in lit_props] or cast.accent_pool
             for downbeat in analysis.beats.downbeat_times:
                 if pool and section.start_time <= downbeat < section.end_time:
-                    at = to_frame(downbeat * 1000)
+                    kick = nearest_kick(kick_times, downbeat)
+                    at = to_frame((downbeat if kick is None else kick) * 1000)
                     if at >= song_end:
                         continue
                     plan.append(_placement(pool[accent_turn % len(pool)], 0, "On_solid", at, at + ACCENT_MS, palette))

@@ -655,11 +655,12 @@ async def create_sequence(
     "auto" writes a simple baseline: quiet sections (intro, outro, breakdown) get the
     largest wash group dimmed; other sections light half of the feature groups at a
     time, alternating by height; chorus, drop and instrumental sections add short hits
-    on accent props at each downbeat. Without feature groups, the show's props take
-    turns instead. It includes Beats and Bars timing tracks, plus
-    Drums, Bass and Instruments when stems are available. It never overwrites an
-    existing sequence; it picks "<song> (generated N)" instead. For a hand-made-style
-    sequence, use the sequence_song prompt and write_sequence.
+    on accent props at each downbeat (starting at the kick when one is within 100 ms).
+    Without feature groups, the show's props take turns instead. It includes Beats and
+    Bars timing tracks, plus Drums, Bass, Instruments and Kicks when stems are
+    available. It never overwrites an existing sequence; it picks "<song> (generated N)"
+    instead. For a hand-made-style sequence, use the sequence_song prompt and
+    write_sequence.
 
     Args:
         mp3_path: Path to the .mp3 file
@@ -761,7 +762,8 @@ async def write_sequence(
             the active show folder
         name: Sequence file name without .xsq (default: the song's file name)
         timing_tracks: Any of "Beats" (labelled with the beat's position in its bar), "Bars"
-            (numbered), "Drums", "Bass", "Instruments" (stem onsets; need stem separation).
+            (numbered), "Drums", "Bass", "Instruments" (stem onsets) and "Kicks" (drum hits
+            with a kick's low end); the stem tracks need stem separation.
             Effects can reference them, e.g. E_CHOICE_VUMeter_TimingTrack=Beats.
         overwrite: Replace an existing .xsq with the same name
         validate_only: Run every check and return the report without writing

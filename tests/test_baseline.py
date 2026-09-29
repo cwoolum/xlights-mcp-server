@@ -9,6 +9,7 @@ import pytest
 from show_fixtures import SHOW_GROUPS, make_analysis
 
 from xlights_mcp.audio.sections import SongSection
+from xlights_mcp.audio.stems_model import StemAnalysis, StemOnsets
 from xlights_mcp.sequencer.engine import (
     ACCENT_MS,
     BED_EFFECTS,
@@ -95,6 +96,34 @@ def test_accents_hit_each_downbeat_of_accent_sections_on_props_not_already_lit()
     assert all(p["effect"] == "On" and p["end_ms"] - p["start_ms"] == ACCENT_MS for p in chorus)
     assert [p["element"] for p in chorus] == ["Door L", "Door R", "Arch 1", "Arch 2", "Door L", "Door R"]
     assert _accents(_within(plan, 8, 20)) == []
+
+
+def _chorus_accent_starts(kicks, onset_bass=None):
+    drums = StemOnsets(
+        name="drums",
+        onset_times=kicks,
+        onset_bass=[1.0] * len(kicks) if onset_bass is None else onset_bass,
+    )
+    analysis = ANALYSIS.model_copy(
+        update={"stem_analysis": StemAnalysis(available=True, stems={"drums": drums})}
+    )
+    plan = build_baseline_plan(analysis, SHOW, COLORS)
+    return [p["start_ms"] for p in _accents(_within(plan, 19, 32))]
+
+
+CHORUS_DOWNBEATS = [20000, 22000, 24000, 26000, 28000, 30000]
+
+
+def test_an_accent_snaps_to_a_kick_just_before_its_downbeat():
+    assert _chorus_accent_starts([19.94]) == [19950, *CHORUS_DOWNBEATS[1:]]
+
+
+def test_an_accent_stays_on_the_downbeat_when_the_nearest_kick_is_too_far():
+    assert _chorus_accent_starts([19.85]) == CHORUS_DOWNBEATS
+
+
+def test_accents_stay_on_downbeats_when_kick_levels_are_unusable():
+    assert _chorus_accent_starts([19.94], onset_bass=[]) == CHORUS_DOWNBEATS
 
 
 def test_every_placement_uses_the_given_colours():
