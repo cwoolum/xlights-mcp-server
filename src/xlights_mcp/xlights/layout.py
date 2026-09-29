@@ -182,3 +182,20 @@ def build_show_layout(show: ShowConfig) -> dict[str, Any]:
         "ungrouped_models": sorted(n for n in real if n not in grouped),
         "warnings": [*show.warnings, *warnings],
     }
+
+
+def contained_elements(show: ShowConfig) -> dict[str, frozenset[str]]:
+    """Each group's nested groups (transitively) and the real models they reach."""
+    groups = {g.name: g for g in show.model_groups}
+    result = {}
+    for name, group in groups.items():
+        seen: set[str] = set()
+        stack = list(group.child_groups)
+        while stack:
+            child = stack.pop()
+            if child == name or child in seen:
+                continue
+            seen.add(child)
+            stack.extend(groups[child].child_groups if child in groups else [])
+        result[name] = frozenset(seen | set(group.leaf_models))
+    return result

@@ -10,6 +10,7 @@ from xlights_mcp.xlights.layout import (
     TIERS,
     build_show_layout,
     classify_groups,
+    contained_elements,
     load_tier_overrides,
 )
 from xlights_mcp.xlights.show import load_show_config
@@ -250,3 +251,14 @@ def test_group_with_exactly_half_submodel_members_is_not_a_submodel_group(tmp_pa
     tiers = classify_groups(load_show_config(show))
 
     assert tiers["Half"][1] != "submodel group"
+
+
+def test_contained_elements_are_nested_groups_and_their_models():
+    contained = contained_elements(load_show_config(SHOW))
+
+    assert contained["House"] == {
+        "Roof Edges", "Under Roof", "Door",
+        "Roof Left", "Roof Right", "Under Left", "Under Right", "Door L", "Door R",
+    }
+    assert contained["Cycle A"] == {"Cycle B", "Door L"}
+    assert "Pipes" not in contained["House"]
