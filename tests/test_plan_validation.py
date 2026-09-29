@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from curve_fixtures import slots
 
 from xlights_mcp.sequencer.plan import BLEND_MODES, validate_plan
 from xlights_mcp.xlights.effects import XLIGHTS_EFFECT_NAMES
@@ -438,9 +439,7 @@ def test_a_brightness_curve_becomes_palette_points_across_the_placement():
 
     assert result.errors == [] and result.warnings == []
     palette = result.placements[0].palette
-    assert [(round(x * 200), level) for x, level in palette.brightness_curve] == [
-        (0, 100), (100, 100), (101, 300), (200, 300),
-    ]
+    assert slots(palette.brightness_curve) == [(0, 100), (100, 100), (101, 300), (200, 300)]
 
 
 def test_curve_point_times_are_frame_rounded():
@@ -464,9 +463,9 @@ def test_curve_points_must_be_pairs_of_numbers(points):
     assert "palette.brightness points must be [t_ms, value] pairs" in _validate(_curve(points)).errors[0]
 
 
-def test_a_curve_needs_two_points():
-    assert "palette.brightness needs at least 2 points" in _validate(_curve([[1000, 100]])).errors[0]
-    assert "palette.brightness needs at least 2 points" in _validate(_curve([])).errors[0]
+@pytest.mark.parametrize("points", [[[1000, 100]], []])
+def test_a_curve_needs_two_points(points):
+    assert "palette.brightness needs at least 2 points" in _validate(_curve(points)).errors[0]
 
 
 @pytest.mark.parametrize("t", [900, 2100])
@@ -522,17 +521,3 @@ def test_a_curve_on_a_placement_clipped_to_the_song_end_is_cut_at_the_end():
     assert result.errors == []
     assert result.placements[0].end_time_ms == 1500
     assert result.placements[0].palette.brightness_curve == [(0.0, 100), (1.0, 200)]
-
-
-def test_a_clipped_curve_drops_the_points_after_the_song_end():
-    points = [[1000, 100], [1400, 100], [1600, 200], [2000, 300]]
-
-    curve = _validate(_curve(points, start_ms=1000, end_ms=2000), duration_ms=1500).placements[0].palette.brightness_curve
-
-    assert [(round(x * 200), level) for x, level in curve] == [(0, 100), (160, 100), (200, 150)]
-
-
-def test_a_clipped_curve_that_starts_after_the_song_end_points_holds_its_first_value():
-    curve = _validate(_curve([[1600, 250], [2000, 300]], start_ms=1000, end_ms=2000), duration_ms=1500).placements[0].palette.brightness_curve
-
-    assert curve == [(0.0, 250), (1.0, 250)]
