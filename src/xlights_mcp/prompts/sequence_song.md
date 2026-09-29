@@ -44,7 +44,7 @@ A placement looks like this:
 ```
 
 `settings` is optional: xLights uses each effect's defaults for anything you leave out. Some useful settings:
-- **SingleStrand chase:** `E_NOTEBOOK_SSEFFECT_TYPE` = `Chase`; `E_CHOICE_Chase_Type1` = `Left-Right`, `Right-Left`, `From Middle` or `Bounce from Left`; `E_SLIDER_Chase_Rotations` sets the number of passes.
+- **SingleStrand chase:** `E_NOTEBOOK_SSEFFECT_TYPE` = `Chase`; `E_CHOICE_Chase_Type1` = `Left-Right`, `Right-Left`, `From Middle` or `Bounce from Left`; `E_TEXTCTRL_Chase_Rotations` sets the number of passes (e.g. `1.0`, `2`, `4`).
 - **Color Wash:** `E_TEXTCTRL_ColorWash_Cycles` sets the colour cycles over the effect.
 - **Twinkle:** `E_SLIDER_Twinkle_Count` sets the density and `E_SLIDER_Twinkle_Steps` the speed (lower is faster).
 - **Shockwave:** `E_SLIDER_Shockwave_Start_Radius` and `E_SLIDER_Shockwave_End_Radius` (0–250).

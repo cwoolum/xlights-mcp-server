@@ -10,6 +10,7 @@ from xlights_mcp.audio.sections import SongSection
 from xlights_mcp.sequencer.engine import (
     ACCENT_MS,
     BED_EFFECTS,
+    EFFECT_VARIANTS,
     FACE_BED_KEYS,
     MOTION_EFFECTS,
     WASH_BRIGHTNESS,
@@ -181,3 +182,11 @@ def test_a_show_without_feature_groups_gets_no_feature_or_accent_placements():
 
     assert {(p["element"], p["layer"]) for p in plan} == {("Everything Flat", 0)}
     assert len(plan) == 3
+
+
+def test_chase_variants_use_the_textctrl_rotations_key():
+    chases = [v for key, variants in EFFECT_VARIANTS.items() if key.startswith("Chase_") for v in variants]
+
+    assert len(chases) == 4
+    assert all(v["E_TEXTCTRL_Chase_Rotations"] == "1.0" for v in chases)
+    assert not any("E_SLIDER_Chase_Rotations" in v for variants in EFFECT_VARIANTS.values() for v in variants)
