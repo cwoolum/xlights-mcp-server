@@ -188,6 +188,13 @@ def test_settings_maps_accept_finite_floats():
     assert _validate(_p(settings={"E_A": 1.5})).placements[0].settings == {"E_A": "1.5"}
 
 
+@pytest.mark.parametrize("settings", ["E_A=1, E_B=2", {" E_X ": 1}, {"E X": 1}, "E_A=1,\tE_B=2"])
+def test_settings_keys_cannot_contain_whitespace(settings):
+    error = _validate(_p(settings=settings)).errors[0]
+
+    assert "invalid settings key" in error and "no spaces" in error
+
+
 @pytest.mark.parametrize("settings", ["E_A=1,oops", "=1", "E_A=1,E_A=2", 5])
 def test_malformed_settings_are_errors(settings):
     assert "settings" in _validate(_p(settings=settings)).errors[0]

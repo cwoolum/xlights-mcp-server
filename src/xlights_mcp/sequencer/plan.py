@@ -28,7 +28,7 @@ _EFFECT_ALIASES = {
     "single strand": "SingleStrand",
 }
 _CHASE_NOTE = " (Chase is a SingleStrand mode: E_NOTEBOOK_SSEFFECT_TYPE=Chase)"
-_HEX_COLOUR =re.compile(r"#[0-9A-Fa-f]{6}")
+_HEX_COLOUR = re.compile(r"#[0-9A-Fa-f]{6}")
 
 
 class PlanError(ValueError):
@@ -174,8 +174,8 @@ def _settings(value) -> dict[str, str]:
         raise PlanError("settings must be an object or a 'KEY=VALUE,KEY=VALUE' string")
     settings: dict[str, str] = {}
     for key, text in pairs:
-        if not key or "," in key or "=" in key:
-            raise PlanError(f"invalid settings key {key!r}")
+        if not key or "," in key or "=" in key or any(c.isspace() for c in key):
+            raise PlanError(f"invalid settings key {key!r} (no spaces; separate settings with ',' only)")
         if key in settings:
             raise PlanError(f"settings key {key} appears twice")
         settings[key] = text
