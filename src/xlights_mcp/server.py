@@ -36,6 +36,17 @@ def get_config() -> ServerConfig:
     return _config
 
 
+def _active_show(config: ServerConfig) -> Path | dict:
+    """The active show folder, or an action_required dict when none is usable."""
+    show_path = config.active_show_path
+    if not show_path or not show_path.exists():
+        return {
+            "error": "No active show folder configured.",
+            "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
+        }
+    return show_path
+
+
 def _resolve_show(config: ServerConfig, show_name: str | None) -> dict | Path:
     """Resolve which show folder to use.
 
@@ -194,12 +205,9 @@ def list_models(include_placeholders: bool = False) -> dict:
     from xlights_mcp.xlights.show import load_show_models
 
     config = get_config()
-    show_path = config.active_show_path
-    if not show_path or not show_path.exists():
-        return {
-            "error": "No active show folder configured.",
-            "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
-        }
+    show_path = _active_show(config)
+    if isinstance(show_path, dict):
+        return show_path
 
     models = [m for m in load_show_models(show_path) if include_placeholders or not m.is_placeholder]
     return {
@@ -229,18 +237,9 @@ def get_show_layout(show_name: str | None = None) -> dict:
     from xlights_mcp.xlights.show import load_show_config
 
     config = get_config()
-    if show_name:
-        resolved = _resolve_show(config, show_name)
-        if isinstance(resolved, dict):
-            return resolved
-        show_path = resolved
-    else:
-        show_path = config.active_show_path
-        if not show_path or not show_path.exists():
-            return {
-                "error": "No active show folder configured.",
-                "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
-            }
+    show_path = _resolve_show(config, show_name) if show_name else _active_show(config)
+    if isinstance(show_path, dict):
+        return show_path
 
     layout = build_show_layout(load_show_config(show_path))
     layout["show"] = show_name or config.active_show
@@ -256,12 +255,9 @@ def list_controllers() -> dict:
     from xlights_mcp.xlights.show import load_show_controllers
 
     config = get_config()
-    show_path = config.active_show_path
-    if not show_path or not show_path.exists():
-        return {
-            "error": "No active show folder configured.",
-            "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
-        }
+    show_path = _active_show(config)
+    if isinstance(show_path, dict):
+        return show_path
 
     controllers = load_show_controllers(show_path)
     return {
@@ -275,12 +271,9 @@ def list_controllers() -> dict:
 def list_sequences() -> dict:
     """List all sequences (.xsq files) in the active show folder."""
     config = get_config()
-    show_path = config.active_show_path
-    if not show_path or not show_path.exists():
-        return {
-            "error": "No active show folder configured.",
-            "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
-        }
+    show_path = _active_show(config)
+    if isinstance(show_path, dict):
+        return show_path
 
     sequences = []
     for xsq in sorted(show_path.glob("*.xsq")):
@@ -664,12 +657,9 @@ async def write_sequence(
     from xlights_mcp.sequencer.plan_writer import write_plan
 
     config = get_config()
-    show_path = config.active_show_path
-    if not show_path or not show_path.exists():
-        return {
-            "error": "No active show folder configured.",
-            "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
-        }
+    show_path = _active_show(config)
+    if isinstance(show_path, dict):
+        return show_path
     path = Path(mp3_path).expanduser()
     if not path.exists():
         return {"error": f"File not found: {path}"}
