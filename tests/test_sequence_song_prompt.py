@@ -35,6 +35,18 @@ def test_without_a_reference_it_gives_default_targets():
     assert "no hand-made sequence" in text.lower()
 
 
+def test_an_existing_sequence_gets_a_new_name_unless_the_user_agreed_to_replace_it():
+    text = render_sequence_song("Song.mp3", None, None)
+
+    assert "pass a new `name`, or `overwrite: true` only if the user agreed" in text
+
+
+def test_accents_follow_drum_onsets():
+    text = render_sequence_song("Song.mp3", None, None)
+
+    assert "drum onsets" in text and "kick" not in text
+
+
 def test_show_notes_are_embedded():
     assert "Never light the neighbours' side" in render_sequence_song("Song.mp3", None, "Never light the neighbours' side")
 

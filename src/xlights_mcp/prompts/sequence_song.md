@@ -30,7 +30,7 @@ Call `get_show_layout`. Every group has a tier:
 For each section, decide what carries it:
 - **Wash base:** use a wash group as a base only where the section's energy and the reference call for it, such as quiet intros or big drops.
 - **Rotation:** rotate which feature groups carry motion between sections and phrases, and don't light everything at once. Match the reference's concurrency and dark share.
-- **Accents:** put short accents (20–200 ms) on accent props at hits, for example kick or snare onsets in a drop, or downbeats in a chorus.
+- **Accents:** put short accents (20–200 ms) on accent props at hits, for example drum onsets in a drop, or downbeats in a chorus.
 - **Energy:** build energy with effect speed, density and brightness, not by stacking layers. Use at most 3 layers (0–2) per element; most elements need only layer 0.
 - **Parents and children:** a group lit at the same time as a group or model inside it reads as one element, and the writer warns about it. Do it on purpose (a dim parent base under a bright child), not by accident.
 - **Overlaps:** effects on the same element and layer must not overlap. End one where the next starts.
@@ -59,5 +59,5 @@ For a long plan, write the placements to a JSON file in the show folder and pass
 
 1. Call `write_sequence` with `mp3_path` = `{{mp3_path}}`, your plan, and `timing_tracks: ["Beats", "Bars"]`. Add `"Drums"` when stems are available. Set `validate_only: true`.
 2. Fix every error it reports and call again until there are none. Read the warnings.
-3. Call it once more without `validate_only`. Pass `overwrite: true` only if the user agreed to replace an existing sequence.
+3. Call it once more without `validate_only`. If `<song>.xsq` already exists, pass a new `name`, or `overwrite: true` only if the user agreed to replace it.
 4. Report the file path, the effect count, and any warnings you chose to keep.
