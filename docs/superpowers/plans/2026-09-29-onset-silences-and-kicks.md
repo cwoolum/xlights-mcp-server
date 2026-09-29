@@ -58,7 +58,7 @@ The implementation must match them. Task 6 checks parity.
 
 - [ ] **Step 1: Write the failing tests.**
 
-  Build the fixtures with a small energy helper: frames every 0.02 s from 0 to the duration, level 0.0 except over `(start, end, level)` segments. Use `make_analysis(16.0, beats, downbeats, stem_analysis=StemAnalysis(available=True, stems={...}))`, with 120 BPM beats (`np.arange(0, 16, 0.5)`) unless a case says otherwise. Each audible hit gets a segment `(h, h + 0.08, 0.8)`.
+  Build the fixtures with a small energy helper: frames every 0.02 s from 0 to the duration, level 0.0 except over `(start, end, level)` segments. Segments are applied in order, and a later segment overrides an earlier one. Use `make_analysis(16.0, beats, downbeats, stem_analysis=StemAnalysis(available=True, stems={...}))`, with 120 BPM beats (`np.arange(0, 16, 0.5)`) unless a case says otherwise. Each audible hit gets a segment `(h, h + 0.08, 0.8)`.
 
   Cases, with the expected result for each:
 
@@ -67,7 +67,7 @@ The implementation must match them. Task 6 checks parity.
      - Setup: hits every 0.5 s from 0.0 to 4.0, then 12.0 to 15.5. A tail at 0.2 over [4.08, 6.0).
      - Expected span: `[4.5, 12.0)`. `beat_after(4.0)` is 4.5, not the energy silence start of 6.0.
   2. **Ghost hits and bleed.**
-     - Setup: as case 1, plus onsets at 9.0 and 10.0 whose energy stays 0.02 around them, and energy 0.06 over [8, 12).
+     - Setup: as case 1, plus onsets at 9.0 and 10.0. Segments, in this order: bleed `(8, 12, 0.06)`, then ghosts `(8.9, 9.2, 0.02)` and `(9.9, 10.2, 0.02)`.
      - Expected: the span is unchanged, `[4.5, 12.0)`. The ghost onsets don't split it.
   3. **Roll veto.**
      - Setup: as case 1, but energy 0.5 over [5, 11.9) with no hits.
@@ -79,8 +79,8 @@ The implementation must match them. Task 6 checks parity.
      - Setup: beats stop at 10.0, and hits run 0–4 and 12.0–12.5 with nothing after.
      - Expected: the trailing span starts at `12.5 + 0.5` = 13.0.
   6. **Grid with fewer than 2 beats.**
-     - Setup: `beat_times=[]`.
-     - Expected: `beat_after(t) = t + 0.5`.
+     - Setup: `beat_times=[]`, with case 4's 3.92 hit.
+     - Expected: the span starts at 4.42 (`3.92 + 0.5`), which the grid could never give.
   7. **Empty stem.**
      - Setup: no onsets, energy 0.
      - Expected: `[(0.0, 16.0)]`.
@@ -107,8 +107,8 @@ The implementation must match them. Task 6 checks parity.
 
   **Finishing**
   - Filtering happens before merging: drum hits every 0.45 s with no audible gaps at least 1 s long give `[]` with `merge_gap_ms=500`.
-  - Touching spans merge at `merge_gap_ms=0`, and a span ending past the duration is clamped.
-  - `min_ms=0` keeps short spans.
+  - Test `_finish` directly for touching spans and clamping, which `bounded_silences` can't reach: `_finish([(1, 3), (3, 5), (14, 20)], 16, 1, 0) == [(1, 5), (14, 16)]`.
+  - `min_ms=0` keeps short spans. Use off-grid drum hits every 0.45 s, which leave short gaps.
 
   **Kicks**
   - With `onset_bass` [0.3, 0.29, 0.9] at [1.0, 2.0, 3.0] plus a duplicate 3.0, the result is `[1.0, 3.0]`.
@@ -132,6 +132,7 @@ from __future__ import annotations
 
 import bisect
 from collections.abc import Callable, Sequence
+from itertools import pairwise
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -227,7 +228,7 @@ def _drum_spans(hits, times, energy, beat_times, duration) -> list[Span]:
         after = _beat_after(beat_times)
         candidates = [
             (0.0, audible[0]),
-            *((after(a), b) for a, b in zip(audible, audible[1:])),
+            *((after(a), b) for a, b in pairwise(audible)),
             (after(audible[-1]), duration),
         ]
     return [(s, e) for s, e in candidates if e > s and not _is_roll(s, e, times, energy)]
@@ -262,6 +263,8 @@ def _finish(spans: list[Span], duration: float, min_s: float, merge_gap_s: float
 ```
 
 Type-annotate the helper parameters (`list[float]`, `np.ndarray`, `Sequence[float]`, `list[tuple[float, float]]`) to match the rest of the module. They are elided above for space.
+
+This differs from the prototype in one edge case that real data never hits: a stem with no energy frames. Here every hit counts as audible and the stored sustained end is kept; the prototype does the opposite.
 
 - [ ] **Step 4: Run to pass.** Run `.venv/Scripts/python -m pytest tests/test_silences.py -q`.
 - [ ] **Step 5: Commit** with the message "Hit-bounded stem silences and kick times".
@@ -304,6 +307,8 @@ Type-annotate the helper parameters (`list[float]`, `np.ndarray`, `Sequence[floa
 3. **`analyze_song` docstring:** `stems.silences_ms` uses the same bounded spans, while `sections[].drums` still comes from the energy-based structure analysis.
 4. **Tests:**
    - `test_analyze_song_tool.py::test_analyze_song_reports_stem_summary_and_provenance` asserts `[[7755, 12005]]`. With runs (0, 8) and (12, 20), 0.5 s beats and energy 1.0 in the runs, the bounded drum span is `[8000, 12000]`: `beat_after(7.5)` is 8.0 and the next hit is 12.0. Update the assertion.
+   - `test_stem_events.py::test_summary_reports_counts_energy_and_silences_in_ms` asserts `7700 < start < 7900`; the start becomes 8000.
+   - The "~7755-12005ms" comment in `test_silences_zero_length_window_returns_empty` is now stale.
    - Recompute any other silence expectations in `test_stem_events.py` the same way, and state the derivation in a short comment where the number isn't obvious.
    - New tests:
      - `kicks` events (and truncation), and kicks with `stem="bass"` giving an error;
@@ -326,14 +331,21 @@ Type-annotate the helper parameters (`list[float]`, `np.ndarray`, `Sequence[floa
 2. **`engine._baseline_placements`:**
    - Compute `kick_times` once: `kicks(analysis)` inside `try`/`except ValueError`, falling back to `[]`.
    - For each accent downbeat, `k = nearest_kick(kick_times, downbeat)`, then `at = to_frame((downbeat if k is None else k) * 1000)`. Keep the last-frame guard.
-3. **Tests:**
-   - **Kicks track:** marks for the kicks with no stems or no kicks each give a warning, and `"Kicks"` is in `TIMING_TRACK_NAMES`.
+3. **Docs that list the stem tracks:** add `Kicks` in each of these:
+   - the `create_sequence` docstring (server.py, around line 635);
+   - the `write_sequence` `timing_tracks` argument (server.py, around lines 738–739);
+   - the README's baseline paragraph (around line 334).
+4. **Tests:**
+   - **Kicks track:**
+     - The existing `_analysis(stems=True)` in `test_timing_tracks.py` has no `onset_bass`, so `kicks()` raises there; build the drums stem with explicit `onset_bass` for the "track is built" case.
+     - Marks are made for the kicks, and no stems or no kicks each give a warning.
+     - `"Kicks"` is in `TIMING_TRACK_NAMES`.
    - **Baseline snap:** use the existing chorus case in `test_baseline.py` and add a drums stem.
      - A kick at 19.94 moves the 20.0 accent to `to_frame(19940)` = 19950.
      - A kick at 19.85 leaves it at 20000.
      - Without stems, accents are unchanged.
-   - **Baseline track list:** `create_sequence` with stems includes `Kicks`. Update any assertion on the exact track list.
-4. **Commit** with the message "Kicks timing track; baseline accents snap to kicks".
+   - **Baseline track list:** no existing test runs `create_sequence` with stems. In `test_engine_auto.py`, where the `audio` fixture caches a `make_analysis`, add a test whose analysis carries `stem_analysis=StemAnalysis(available=True, stems={"drums": make_drum_stem(...)})` and assert `"Kicks"` is in `result["timing_tracks"]`.
+5. **Commit** with the message "Kicks timing track; baseline accents snap to kicks".
 
 ### Task 4: Playbook and README
 
