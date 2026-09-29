@@ -76,7 +76,7 @@ The spans are computed over the whole song from the cached `onset_times`, the st
 
 Filtering before merging matters: merging first would chain the tiny gaps between hi-hats into a span over real kicks.
 
-For bass, other and vocals, a `min_ms` below 1000 has no effect, because their stored silences are already at least 1 s long (`MIN_SILENCE_S`).
+For bass, other and vocals, a `min_ms` below 1000 rarely matters: their stored silences are at least 1 s long (`MIN_SILENCE_S`), though a span can come out up to 0.1 s shorter when its end snaps to a hit.
 
 On Ghosts, the defaults give 4 drum spans: [0, 7.036), [51.710, 65.945), [110.540, 139.482), [184.041, 187.288).
 - The breakdown is a single span because its stray FX onset at 137.509 is a ghost hit (peak energy 0.028).

@@ -79,8 +79,9 @@ def _audible(t: float, times: np.ndarray, energy: np.ndarray) -> bool:
     if times.size == 0:
         return True
     before, after = AUDIBLE_WINDOW_S
-    window = (times >= t - before) & (times <= t + after)
-    return bool(window.any() and energy[window].max() >= SILENCE_THRESHOLD)
+    lo = np.searchsorted(times, t - before)
+    hi = np.searchsorted(times, t + after, side="right")
+    return bool(hi > lo and energy[lo:hi].max() >= SILENCE_THRESHOLD)
 
 
 def _is_roll(start: float, end: float, times: np.ndarray, energy: np.ndarray) -> bool:

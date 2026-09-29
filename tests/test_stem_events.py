@@ -279,7 +279,9 @@ def test_validate_stem_query_normalises_the_stem_and_lists_the_alias():
 
 @pytest.fixture
 def two_gaps(analysis) -> SongAnalysis:
-    analysis.stem_analysis.stems["drums"] = make_drum_stem([(0, 4), (6, 10), (12, 20)], duration=20.0)
+    analysis.stem_analysis.stems["drums"] = make_drum_stem(
+        [(0, 4), (6, 10), (12, 20)], duration=20.0
+    )
     return analysis
 
 

@@ -142,12 +142,17 @@ async def test_preview_plan_streams_progress(
     assert any("beat" in (m or "").lower() for _, _, m in progress)
 
 
-def _cache_fake_analysis(path: Path, config: ServerConfig, with_stems: bool = True) -> None:
+def _cache_fake_analysis(
+    path: Path, config: ServerConfig, with_stems: bool = True, with_other: bool = False
+) -> None:
     section = (
         SongSection(label="drop", start_time=0.0, end_time=20.0, structure_source="stems", drums="present")
         if with_stems
         else SongSection(label="drop", start_time=0.0, end_time=20.0, structure_source="mixdown", drums=None)
     )
+    stems = {"drums": make_drum_stem([(0, 8), (12, 20)], duration=20.0)} if with_stems else {}
+    if with_other:
+        stems["other"] = make_drum_stem([(0, 4)], duration=20.0, name="other")
     analysis = SongAnalysis(
         file_path=str(path),
         file_name=path.name,
@@ -162,7 +167,7 @@ def _cache_fake_analysis(path: Path, config: ServerConfig, with_stems: bool = Tr
         sections=[section],
         stem_analysis=StemAnalysis(
             available=with_stems,
-            stems={"drums": make_drum_stem([(0, 8), (12, 20)], duration=20.0)} if with_stems else {},
+            stems=stems,
         ),
     )
     save_cached(analysis, path, config.audio.cache_dir)
@@ -234,7 +239,13 @@ async def test_get_stem_events_serves_kicks(click_track: Path, isolated_config: 
 
     payload, _ = await _call(
         "get_stem_events",
-        {"mp3_path": str(click_track), "stem": "drums", "kind": "kicks", "start_ms": 7000, "end_ms": 13000},
+        {
+            "mp3_path": str(click_track),
+            "stem": "drums",
+            "kind": "kicks",
+            "start_ms": 7000,
+            "end_ms": 13000,
+        },
     )
 
     assert payload["events_ms"] == [7000, 7500, 12000, 12500]
@@ -243,13 +254,16 @@ async def test_get_stem_events_serves_kicks(click_track: Path, isolated_config: 
 async def test_get_stem_events_accepts_the_instruments_alias(
     click_track: Path, isolated_config: ServerConfig
 ):
-    _cache_fake_analysis(click_track, isolated_config)
+    _cache_fake_analysis(click_track, isolated_config, with_other=True)
+    args = {"mp3_path": str(click_track), "stem": "Instruments"}
 
-    payload, _ = await _call(
-        "get_stem_events", {"mp3_path": str(click_track), "stem": "Instruments", "kind": "onsets"}
-    )
+    onsets, _ = await _call("get_stem_events", {**args, "kind": "onsets"})
+    silences, _ = await _call("get_stem_events", {**args, "kind": "silences"})
 
-    assert payload["error"] == "Stem 'other' was not analyzed for this song. Available: drums"
+    assert onsets["stem"] == "other"
+    assert onsets["events_ms"] == [0, 500, 1000, 1500, 2000, 2500, 3000, 3500]
+    assert silences["stem"] == "other"
+    assert silences["spans_ms"]
 
 
 async def test_get_stem_events_passes_min_ms_and_merge_gap_ms(
