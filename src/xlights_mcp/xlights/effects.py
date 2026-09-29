@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from xlights_mcp.xlights.xsq_writer import is_generated_sequence
+from xlights_mcp.xlights.xsq_writer import HEAD_BYTES, is_generated_sequence
 
 XLIGHTS_EFFECT_NAMES: frozenset[str] = frozenset({
     "Off", "On", "Adjust", "Bars", "Butterfly", "Candle", "Circles", "Color Wash", "Curtain",
@@ -21,7 +21,6 @@ XLIGHTS_EFFECT_NAMES: frozenset[str] = frozenset({
 })
 
 _EFFECT_NAME = re.compile(rb'<Effect\b[^>]*?\bname="([^"]+)"')
-_HEAD_BYTES = 4096
 
 
 class EffectDef(BaseModel):
@@ -219,7 +218,7 @@ def get_effects_for_musical_feature(feature: str) -> list[str]:
 @lru_cache(maxsize=512)
 def _effect_names_in(path: Path, mtime_ns: int, size: int) -> frozenset[str]:
     with path.open("rb") as f:
-        head = f.read(_HEAD_BYTES)
+        head = f.read(HEAD_BYTES)
         if is_generated_sequence(head):
             return frozenset()
         data = head + f.read()

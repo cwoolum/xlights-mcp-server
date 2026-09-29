@@ -9,11 +9,10 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from xlights_mcp.xlights.xsq_writer import is_generated_sequence
+from xlights_mcp.xlights.xsq_writer import HEAD_BYTES, is_generated_sequence
 
 logger = logging.getLogger(__name__)
 
-_HEAD_BYTES = 4096
 _MEDIA_TYPE = re.compile(rb"<sequenceType>\s*Media\s*</sequenceType>")
 
 
@@ -182,12 +181,12 @@ def read_xsq_effect_db(xsq_path: Path) -> list[dict]:
 def is_generated_file(xsq_path: Path) -> bool:
     """True when the sequence was written by this server's generator."""
     with open(xsq_path, "rb") as f:
-        return is_generated_sequence(f.read(_HEAD_BYTES))
+        return is_generated_sequence(f.read(HEAD_BYTES))
 
 
 def _is_media_sequence(xsq_path: Path) -> bool:
     with open(xsq_path, "rb") as f:
-        return _MEDIA_TYPE.search(f.read(_HEAD_BYTES)) is not None
+        return _MEDIA_TYPE.search(f.read(HEAD_BYTES)) is not None
 
 
 def latest_hand_made_sequence(show_path: Path) -> Path | None:
