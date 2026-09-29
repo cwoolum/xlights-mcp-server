@@ -720,9 +720,9 @@ async def write_sequence(
     misspelt "pallete"), malformed settings or palette, an unknown or duplicate timing track (a
     timing track can't share a name with a model or group), an invalid name, or an existing file
     without overwrite. A group lit while a group or model inside it is also lit
-    is a warning, and so is a Color Wash, Plasma or On with Normal blending on a layer above
-    another layer of the same element while they overlap (it hides that layer: put bases on the
-    highest layer or give the upper effect a blend). The report lists at most 50 errors. Only the
+    is a warning, and so is a Color Wash, Plasma or On with Normal blending that lies over an
+    effect on a higher layer of the same element for that effect's whole duration (it is
+    completely hidden: put bases on the highest layer or give the upper effect a blend). The report lists at most 50 errors. Only the
     elements the plan uses are written, and the file carries the installed xLights version.
 
     Args:

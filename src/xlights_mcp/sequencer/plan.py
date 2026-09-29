@@ -307,13 +307,14 @@ def _layer_cover_warnings(placements: list[EffectPlacement]) -> list[str]:
             if p.effect_name not in FULL_COVERAGE_EFFECTS or p.settings.get(LAYER_METHOD_KEY, "Normal") != "Normal":
                 continue
             for q in items:
-                if q.layer > p.layer and p.start_time_ms < q.end_time_ms and q.start_time_ms < p.end_time_ms:
+                if q.layer > p.layer and p.start_time_ms <= q.start_time_ms and q.end_time_ms <= p.end_time_ms:
                     key = (element, p.layer, q.layer)
                     counts[key] = counts.get(key, 0) + 1
                     first_effect.setdefault(key, p.effect_name)
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     warnings = [
-        f"{n} moment{'s' if n != 1 else ''} where {first_effect[key]} on {key[0]} layer {key[1]} hides layer {key[2]} "
+        f"{n} effect{'s' if n != 1 else ''} on {key[0]} layer {key[2]} completely hidden by "
+        f"{first_effect[key]} on layer {key[1]} "
         "(layer 0 is drawn on top: put bases on the highest layer, or give the upper effect a blend)"
         for key, n in ranked[:PARENT_CHILD_PAIRS_LISTED]
     ]

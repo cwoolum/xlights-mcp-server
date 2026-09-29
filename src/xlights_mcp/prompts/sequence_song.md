@@ -31,7 +31,7 @@ For each section, decide what carries it:
 - **Wash group:** use a wash group only where the section's energy and the reference call for it, such as quiet intros or big drops. Under features, keep it dimmed.
 - **Rotation:** rotate which feature groups carry motion between sections and phrases, and don't light everything at once. Match the reference's concurrency and dark share.
 - **Accents:** put short accents (20–200 ms) on accent props at hits, for example drum onsets in a drop, or downbeats in a chorus.
-- **Energy:** build energy with effect speed, density and brightness, not by stacking layers. Use at most 3 layers (0–2). **Layer 0 is drawn on top**: put accents on layer 0 and bases (wash, Plasma, solid colour) on the highest layer you use. `write_sequence` warns when a base on a top layer hides what's below.
+- **Energy:** build energy with effect speed, density and brightness, not by stacking layers. Use at most 3 layers (0–2). **Layer 0 is drawn on top**: put accents on layer 0 and bases (wash, Plasma, solid colour) on the highest layer you use. `write_sequence` warns when a base on a top layer completely hides an effect below it.
 - **Parents and children:** a group lit at the same time as a group or model inside it reads as one element, and the writer warns about it. Do it on purpose (a dim parent base under a bright child), not by accident.
 - **Overlaps:** effects on the same element and layer must not overlap. End one where the next starts.
 
