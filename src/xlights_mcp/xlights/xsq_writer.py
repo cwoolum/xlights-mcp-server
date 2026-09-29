@@ -13,6 +13,8 @@ from xlights_mcp.xlights.palettes import DEFAULT_PALETTE, ColorPalette
 
 logger = logging.getLogger(__name__)
 
+FRAME_MS = 25
+
 
 class EffectPlacement(BaseModel):
     """A single effect placed on a model at a specific time."""
@@ -49,7 +51,7 @@ class SequenceSpec(BaseModel):
     album: str = ""
     media_file: str = ""
     duration_ms: int = 0
-    timing_ms: int = 25  # frame rate in ms (25ms = 40fps)
+    timing_ms: int = FRAME_MS  # frame rate in ms (25ms = 40fps)
     effects: list[EffectPlacement] = Field(default_factory=list)
     timing_tracks: list[TimingTrack] = Field(default_factory=list)
 
