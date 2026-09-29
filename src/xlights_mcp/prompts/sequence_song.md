@@ -34,6 +34,7 @@ For each section, decide what carries it:
 - **Energy:** build energy with effect speed, density and brightness, not by stacking layers. Use at most 3 layers (0–2). **Layer 0 is drawn on top**: put accents on layer 0 and bases (wash, Plasma, solid colour) on the highest layer you use. `write_sequence` warns when a base on a top layer completely hides an effect below it.
 - **Parents and children:** a group lit at the same time as a group or model inside it reads as one element, and the writer warns about it. Do it on purpose (a dim parent base under a bright child), not by accident.
 - **Overlaps:** effects on the same element and layer must not overlap. End one where the next starts.
+- **Restarts.** Every new placement restarts the effect's pattern. Change effects or settings on the beat, ideally on a downbeat or phrase start, where a restart reads as deliberate. Soften changes with `T_TEXTCTRL_Fadein` and `T_TEXTCTRL_Fadeout` (seconds). Never split an effect just to change its brightness; give it a brightness curve (see below). For a smooth change of speed or colour on a moving base, put the next effect on the layer above with a fade-in, overlapping the previous one by the fade.
 
 A placement looks like this:
 
@@ -57,9 +58,11 @@ A placement looks like this:
 - `Max` for texture over texture;
 - `Layered` fills the dark areas of the layer below.
 
-**Value curves.** A ramp goes in an effect's `E_VALUECURVE_<setting>` key. With `RV=TRUE`, P1, P2, Min and Max are real values in the setting's units, not percentages: Wave speed is ×100 (Max 5000), and palette brightness runs 0–400. A brightness ramp inside one effect goes in `settings` as `C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|Type=Ramp|Min=0.00|Max=400.00|P1=100.00|P2=300.00|RV=TRUE|`. xLights merges effect settings and palette when rendering, so the in-settings ramp works in practice; check the ramp in xLights the first time. Copy working strings only from sequences saved in the current xLights version (`inspect_sequence` shows a sequence's `version`), or check Min and Max against the units above: older files store some values in older units.
+**Value curves.** A ramp goes in an effect's `E_VALUECURVE_<setting>` key. With `RV=TRUE`, P1, P2, Min and Max are real values in the setting's units, not percentages: Wave speed is ×100 (Max 5000). Copy working strings only from sequences saved in the current xLights version (`inspect_sequence` shows a sequence's `version`), or check Min and Max against the units above: older files store some values in older units.
 
-`palette` takes 1–8 `#RRGGBB` colours, a `brightness` of 0–400 (default 100), `sparkles` of 0–200, and `music_sparkles: true` (with `sparkles` above 0) for music-reactive sparkles. Without a palette, the effect is white.
+**Brightness curves** don't go in `settings`. Give `palette.brightness` `[t_ms, value]` points instead, for example `"brightness": [[64000, 100], [72000, 300]]`. Times are song times inside the placement and must not decrease; values are 0–400. Brightness is linear between points, and a step is two points at the same time. The curve has 200 slots across the effect, so a long effect has coarse steps; the writer warns when a point moves more than 25 ms.
+
+`palette` takes 1–8 `#RRGGBB` colours, a `brightness` of 0–400 (default 100) or `[t_ms, value]` points for a brightness curve, `sparkles` of 0–200, and `music_sparkles: true` (with `sparkles` above 0) for music-reactive sparkles. Without a palette, the effect is white.
 
 For a long plan, write the placements to a JSON file in the show folder and pass `plan_path` instead of `plan`.
 

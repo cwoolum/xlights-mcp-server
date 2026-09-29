@@ -293,7 +293,7 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 | Tool | Description |
 |------|-------------|
 | `create_sequence` | Generate a baseline `.xsq` from an `.mp3`: wash in quiet sections, feature groups taking turns, accents on downbeats (use the `sequence_song` prompt for hand-made-style sequences) |
-| `write_sequence` | Validate an effect plan (element, layer 0–2 where layer 0 draws on top, effect, times, settings, palette, optional blend mode) against the show and song, then write it as an `.xsq`, with optional Beats/Bars/stem timing tracks (including Kicks); `validate_only` returns the report without writing |
+| `write_sequence` | Validate an effect plan (element, layer 0–2 where layer 0 draws on top, effect, times, settings, palette with optional brightness curves, optional blend mode) against the show and song, then write it as an `.xsq`, with optional Beats/Bars/stem timing tracks (including Kicks); `validate_only` returns the report without writing |
 | `preview_plan` | Preview the generation plan without writing a file |
 
 ### Sequence Import & Remapping
