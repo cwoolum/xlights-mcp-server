@@ -26,7 +26,7 @@ BLEND_MODES: tuple[str, ...] = (
 LAYER_METHOD_KEY = "T_CHOICE_LayerMethod"
 _PLACEMENT_KEYS = ("element", "layer", "effect", "start_ms", "end_ms", "settings", "palette", "blend")
 _PALETTE_KEYS = ("colors", "brightness", "sparkles", "music_sparkles")
-PARENT_CHILD_PAIRS_LISTED = 10
+WARNINGS_LISTED = 10
 FULL_COVERAGE_EFFECTS = frozenset({"Color Wash", "Plasma", "On"})
 _EFFECT_HINTS = {
     "chase": ("SingleStrand", " (Chase is a SingleStrand mode: E_NOTEBOOK_SSEFFECT_TYPE=Chase)"),
@@ -66,6 +66,7 @@ def validate_plan(
         indexed.append((i, placement))
     result.errors.extend(_overlaps(indexed))
     result.placements = [p for _, p in indexed]
+    result.warnings.extend(_music_sparkle_warnings(plan, indexed))
     result.warnings.extend(_parent_child_warnings(result.placements, show))
     result.warnings.extend(_layer_cover_warnings(result.placements))
     return result
@@ -285,14 +286,13 @@ def _parent_child_warnings(placements: list[EffectPlacement], show: ShowConfig) 
             if n:
                 counts[(parent, child)] = n
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
-    warnings = [
-        f"{n} moment{'s' if n != 1 else ''} where {parent} and {child} are both lit"
-        for (parent, child), n in ranked[:PARENT_CHILD_PAIRS_LISTED]
-    ]
-    extra = len(ranked) - PARENT_CHILD_PAIRS_LISTED
-    if extra > 0:
-        warnings.append(f"... and {extra} more parent/child pair{'s' if extra != 1 else ''} lit together")
-    return warnings
+    return _listed(
+        [
+            f"{n} moment{'s' if n != 1 else ''} where {parent} and {child} are both lit"
+            for (parent, child), n in ranked
+        ],
+        "... and {extra} more parent/child pair{s} lit together",
+    )
 
 
 def _layer_cover_warnings(placements: list[EffectPlacement]) -> list[str]:
@@ -312,13 +312,27 @@ def _layer_cover_warnings(placements: list[EffectPlacement]) -> list[str]:
                     counts[key] = counts.get(key, 0) + 1
                     first_effect.setdefault(key, p.effect_name)
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
-    warnings = [
-        f"{n} effect{'s' if n != 1 else ''} on {key[0]} layer {key[2]} completely hidden by "
-        f"{first_effect[key]} on layer {key[1]} "
-        "(layer 0 is drawn on top: put bases on the highest layer, or give the upper effect a blend)"
-        for key, n in ranked[:PARENT_CHILD_PAIRS_LISTED]
+    return _listed(
+        [
+            f"{n} effect{'s' if n != 1 else ''} on {key[0]} layer {key[2]} completely hidden by "
+            f"{first_effect[key]} on layer {key[1]} "
+            "(layer 0 is drawn on top: put bases on the highest layer, or give the upper effect a blend)"
+            for key, n in ranked
+        ],
+        "... and {extra} more hidden layer pair{s}",
+    )
+
+
+def _listed(lines: list[str], overflow: str) -> list[str]:
+    extra = len(lines) - WARNINGS_LISTED
+    if extra <= 0:
+        return lines
+    return [*lines[:WARNINGS_LISTED], overflow.format(extra=extra, s="s" if extra != 1 else "")]
+
+
+def _music_sparkle_warnings(plan: list[object], indexed: list[tuple[int, EffectPlacement]]) -> list[str]:
+    return [
+        f"placement {i}{_describe(plan[i])}: music_sparkles has no effect while sparkles is 0"
+        for i, p in indexed
+        if p.palette and p.palette.music_sparkles and p.palette.sparkle_frequency == 0
     ]
-    extra = len(ranked) - PARENT_CHILD_PAIRS_LISTED
-    if extra > 0:
-        warnings.append(f"... and {extra} more hidden layer pair{'s' if extra != 1 else ''}")
-    return warnings

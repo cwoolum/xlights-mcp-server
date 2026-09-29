@@ -294,9 +294,11 @@ def test_blend_and_the_layer_method_setting_together_are_an_error():
 
 
 def test_blend_modes_match_the_xlights_list():
-    assert len(BLEND_MODES) == 22
-    assert BLEND_MODES[:3] == ("Normal", "Effect 1", "Effect 2")
-    assert BLEND_MODES[-1] == "Min"
+    assert BLEND_MODES == (
+        "Normal", "Effect 1", "Effect 2", "1 is Mask", "2 is Mask", "1 is Unmask", "2 is Unmask",
+        "1 is True Unmask", "2 is True Unmask", "1 reveals 2", "2 reveals 1", "Shadow 1 on 2", "Shadow 2 on 1",
+        "Layered", "Average", "Bottom-Top", "Left-Right", "Additive", "Subtractive", "Brightness", "Max", "Min",
+    )
 
 
 def test_music_sparkles_maps_onto_the_palette():
@@ -304,6 +306,18 @@ def test_music_sparkles_maps_onto_the_palette():
 
     assert palette.music_sparkles is True
     assert _validate(_p(palette={"colors": ["#FFFFFF"]})).placements[0].palette.music_sparkles is False
+
+
+def test_music_sparkles_without_sparkles_is_a_warning():
+    result = _validate(
+        _p(palette={"colors": ["#FFFFFF"], "music_sparkles": True}),
+        _p(start_ms=2000, end_ms=3000, palette={"colors": ["#FFFFFF"], "music_sparkles": True, "sparkles": 30}),
+    )
+
+    assert result.errors == []
+    assert result.warnings == [
+        "placement 0 ('Door', layer 0, 1000-2000 ms): music_sparkles has no effect while sparkles is 0"
+    ]
 
 
 @pytest.mark.parametrize("value", [1, "true", None])
