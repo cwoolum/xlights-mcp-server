@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import xml.etree.ElementTree as ET
-from collections.abc import Iterable
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -133,7 +132,7 @@ def write_xsq(
     dl.set("source", "1")
 
     display_elems = ET.SubElement(root, "DisplayElements")
-    all_names = _element_order(effects_by_model.keys(), show_config)
+    all_names = _element_order(list(effects_by_model), show_config)
 
     # Timing tracks (lyric tracks, etc.) come first, as in hand-made sequences
     for track in spec.timing_tracks:
@@ -175,10 +174,10 @@ def write_xsq(
         ee.set("name", name)
 
         layers: dict[int, list[tuple[EffectPlacement, int, int]]] = {}
-        for entry in effects_by_model.get(name, []):
+        for entry in effects_by_model[name]:
             layers.setdefault(entry[0].layer, []).append(entry)
 
-        for layer_idx in range(max(layers, default=0) + 1):
+        for layer_idx in range(max(layers) + 1):
             layer_elem = ET.SubElement(ee, "EffectLayer")
             for eff, ref, palette in sorted(layers.get(layer_idx, []), key=lambda e: e[0].start_time_ms):
                 effect_elem = ET.SubElement(layer_elem, "Effect")
@@ -206,11 +205,12 @@ def write_xsq(
     return output_path
 
 
-def _element_order(used: Iterable[str], show_config: ShowConfig) -> list[str]:
-    used = set(used)
-    show_order = [g.name for g in show_config.model_groups] + [m.name for m in show_config.models]
-    ordered = list(dict.fromkeys(name for name in show_order if name in used))
-    return ordered + sorted(used.difference(ordered))
+def _element_order(used: list[str], show_config: ShowConfig) -> list[str]:
+    show_order = [*(g.name for g in show_config.model_groups), *(m.name for m in show_config.models)]
+    rank: dict[str, int] = {}
+    for name in show_order:
+        rank.setdefault(name, len(rank))
+    return sorted(used, key=lambda name: (rank.get(name, len(rank)), name))
 
 
 def is_generated_sequence(head: bytes) -> bool:

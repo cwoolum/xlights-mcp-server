@@ -48,11 +48,8 @@ def _plan(exclude=frozenset()):
     return build_baseline_plan(ANALYSIS, SHOW, COLORS, exclude)
 
 
-def _within(plan, start_s, end_s, layer=None):
-    return [
-        p for p in plan
-        if start_s * 1000 <= p["start_ms"] < end_s * 1000 and (layer is None or p["layer"] == layer)
-    ]
+def _within(plan, start_s, end_s):
+    return [p for p in plan if start_s * 1000 <= p["start_ms"] < end_s * 1000]
 
 
 def _accents(plan):
