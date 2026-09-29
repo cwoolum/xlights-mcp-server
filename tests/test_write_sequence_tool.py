@@ -65,6 +65,14 @@ async def test_plan_path_resolves_against_the_show_folder(show, click_track):
     assert report["errors"] == [] and report["effects"] == 1
 
 
+async def test_a_plan_file_with_a_bom_is_read(show, click_track):
+    (show / "bom.json").write_bytes(b"\xef\xbb\xbf" + json.dumps(PLAN).encode("utf-8"))
+
+    report = await _call({"mp3_path": str(click_track), "plan_path": "bom.json", "validate_only": True})
+
+    assert report["errors"] == [] and report["effects"] == 1
+
+
 @pytest.mark.parametrize("args", [{}, {"plan": PLAN, "plan_path": "plan.json"}])
 async def test_exactly_one_plan_source_is_required(show, click_track, args):
     payload = await _call({"mp3_path": str(click_track), **args})

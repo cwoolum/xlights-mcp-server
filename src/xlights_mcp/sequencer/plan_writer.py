@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
@@ -14,6 +15,8 @@ from xlights_mcp.xlights.show import load_show_config
 from xlights_mcp.xlights.xsq_writer import SequenceSpec, TimingTrack, write_xsq
 
 MAX_REPORTED_ERRORS = 50
+_XSQ_SUFFIX = re.compile(r"\.xsq$", re.IGNORECASE)
+_INVALID_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 def write_plan(
@@ -37,10 +40,12 @@ def write_plan(
         for track, n in Counter(t.name for t in tracks).items() if n > 1
     ]
 
-    stem = name.removesuffix(".xsq") if name is not None else mp3_path.stem
+    stem = _XSQ_SUFFIX.sub("", name) if name is not None else mp3_path.stem
     file_name = f"{stem}.xsq"
     output = show_path / file_name
-    if name is not None and (not stem.strip(" .") or Path(file_name).name != file_name):
+    if name is not None and (
+        not stem.strip(" .") or Path(file_name).name != file_name or _INVALID_NAME_CHARS.search(stem)
+    ):
         errors.append(f"name must be a plain file name without folders, got {name!r}")
     elif output.exists() and not overwrite:
         errors.append(f"{file_name} already exists; pass overwrite=true to replace it")

@@ -617,6 +617,7 @@ async def create_sequence(
         )
     )
 
+
 @mcp.tool()
 async def write_sequence(
     mp3_path: str,
@@ -641,7 +642,8 @@ async def write_sequence(
 
     Times are rounded to the 25 ms frame grid and clipped to the song end (counted under
     "adjusted"). Any error writes nothing: overlapping placements on the same element and layer,
-    a bad layer, an unknown element or effect, an unknown placement or palette key (e.g. a
+    a bad layer, bad times (non-numeric, negative, empty after rounding, or starting at or after
+    the song end), an unknown element or effect, an unknown placement or palette key (e.g. a
     misspelt "pallete"), malformed settings or palette, an unknown or duplicate timing track, or
     an existing file without overwrite. A group lit while a group or model inside it is also lit
     is a warning. The report lists at most 50 errors.
@@ -696,7 +698,6 @@ async def write_sequence(
             validate_only=validate_only,
         )
     )
-
 
 
 @mcp.tool()

@@ -82,7 +82,8 @@ def test_an_existing_file_needs_overwrite(show):
 def test_name_sets_the_file_name_and_rejects_paths(show):
     assert _write(show, name="My Show")["path"] == str(show / "My Show.xsq")
     assert _write(show, name="Other.xsq", validate_only=True)["path"] == str(show / "Other.xsq")
-    for bad in ("../escape", "..", " "):
+    assert _write(show, name="Foo.XSQ", validate_only=True)["path"] == str(show / "Foo.xsq")
+    for bad in ("../escape", "..", " ", "a?b", "a\\b", 'a"b', "a\x01b"):
         assert "name" in _write(show, name=bad)["errors"][0]
 
 
@@ -95,7 +96,9 @@ def test_duplicate_timing_track_names_are_an_error(show):
 
 
 def test_never_writes_a_backup(show):
-    _write(show)
+    (show / "Song.xsq").write_text("old", encoding="utf-8")
+
+    _write(show, overwrite=True)
 
     assert list(show.glob("*.xbkp")) == []
 
