@@ -90,3 +90,24 @@ def test_a_short_effect_snaps_without_warning():
 
 def test_slot_one_is_written_with_its_half_slot_position():
     assert "Values=0.000:0.2500;0.005:0.5000;1.000:0.5000|" in _curve_string([(0, 100), (50, 200), (10000, 200)])
+
+
+def test_a_point_just_after_a_step_merges_into_the_steps_second_slot_and_keeps_the_curve_ordered():
+    curve, warnings = brightness_curve_points([(0, 100), (5000, 100), (5000, 250), (5025, 300), (10000, 300)], 0, 10000)
+
+    assert [round(x * 200) for x, _ in curve] == [0, 100, 101, 200]
+    assert [level for _, level in curve] == [100, 100, 300, 300]
+    assert "brightness points closer than one curve slot (50 ms) were merged" in warnings
+
+
+def test_a_step_at_the_very_end_uses_the_last_two_slots():
+    curve, _ = brightness_curve_points([(0, 100), (10000, 100), (10000, 300)], 0, 10000)
+
+    assert [(round(x * 200), level) for x, level in curve] == [(0, 100), (199, 100), (200, 300)]
+
+
+def test_slots_round_half_up():
+    curve, warnings = brightness_curve_points([(0, 100), (25, 200), (75, 300), (10000, 300)], 0, 10000)
+
+    assert [round(x * 200) for x, _ in curve] == [0, 1, 2, 200]
+    assert warnings == []

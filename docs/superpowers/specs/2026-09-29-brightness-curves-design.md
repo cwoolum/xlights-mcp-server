@@ -45,16 +45,18 @@ C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|Type=Custom|Min=
 
 - `x` has 3 decimal places, so half-slots like 0.005 survive; this is the format the Ghosts v2 script used. `y = level / 400` has 4 decimal places.
 - Points snap to 200 slots across the effect (xLights' `VC_X_POINTS`), so `x = round(frac × 200) / 200`.
-- A step's second point goes one slot later.
+- A step's second point goes one slot later; a step at the very end uses slots 199 and 200.
+- Slots never go backwards: a point that would land before the previous one takes its slot.
+- Slots round half up.
 - If the curve doesn't start at `x = 0` or end at `x = 1`, points are added there holding the first and last values.
 - Two points that land on the same slot keep the later one.
 
 **Warnings:**
-- Snapping moves a point more than 25 ms. This happens when the effect is longer than 5 s, and the warning gives the effect's resolution in ms. It's listed once per placement.
+- Snapping moves a point more than 25 ms. This happens when the effect is longer than 10 s (the largest move is half a slot), and the warning gives the effect's resolution in ms. It's listed once per placement.
 - Two points collapsed into one slot.
 
 **Errors:**
-- a point outside the placement's times;
+- a point outside the placement's frame-rounded times (before clipping to the song end);
 - times out of order;
 - a value outside 0–400;
 - fewer than 2 points;

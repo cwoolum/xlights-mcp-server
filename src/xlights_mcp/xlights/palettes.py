@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 from pydantic import BaseModel, Field
@@ -22,11 +23,15 @@ def brightness_curve_points(
     previous_t: float | None = None
     previous_slot = 0
     for t, level in points_ms:
-        slot = round((t - start_ms) / length * CURVE_SLOTS)
+        slot = math.floor((t - start_ms) / length * CURVE_SLOTS + 0.5)
         if abs(slot * slot_ms - (t - start_ms)) > _SNAP_WARNING_MS:
             snapped = True
         if t == previous_t:
-            slot = min(previous_slot + 1, CURVE_SLOTS)
+            if previous_slot >= CURVE_SLOTS:
+                by_slot[CURVE_SLOTS - 1] = by_slot.pop(CURVE_SLOTS)
+                previous_slot = CURVE_SLOTS - 1
+            slot = previous_slot + 1
+        slot = max(slot, previous_slot)
         if slot in by_slot:
             merged = True
         by_slot[slot] = level
