@@ -57,9 +57,9 @@ A placement looks like this:
 - `Max` for texture over texture;
 - `Layered` fills the dark areas of the layer below.
 
-**Value curves.** A ramp goes in an effect's `E_VALUECURVE_<setting>` key. With `RV=TRUE`, P1, P2, Min and Max are real values in the setting's units, not percentages: Wave speed is ×100 (Max 5000), and palette brightness runs 0–400. A brightness ramp inside one effect goes in `settings` as `C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|Type=Ramp|Min=0.00|Max=400.00|P1=100.00|P2=300.00|RV=TRUE|`. Copy working strings from the user's own sequences when you can.
+**Value curves.** A ramp goes in an effect's `E_VALUECURVE_<setting>` key. With `RV=TRUE`, P1, P2, Min and Max are real values in the setting's units, not percentages: Wave speed is ×100 (Max 5000), and palette brightness runs 0–400. A brightness ramp inside one effect goes in `settings` as `C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|Type=Ramp|Min=0.00|Max=400.00|P1=100.00|P2=300.00|RV=TRUE|`. xLights merges effect settings and palette when rendering, so the in-settings ramp works in practice; check the ramp in xLights the first time. Copy working strings only from sequences saved in the current xLights version (`inspect_sequence` shows a sequence's `version`), or check Min and Max against the units above: older files store some values in older units.
 
-`palette` takes 1–8 `#RRGGBB` colours, a `brightness` of 0–400 (default 100), `sparkles` of 0–200, and `music_sparkles: true` for music-reactive sparkles. Without a palette, the effect is white.
+`palette` takes 1–8 `#RRGGBB` colours, a `brightness` of 0–400 (default 100), `sparkles` of 0–200, and `music_sparkles: true` (with `sparkles` above 0) for music-reactive sparkles. Without a palette, the effect is white.
 
 For a long plan, write the placements to a JSON file in the show folder and pass `plan_path` instead of `plan`.
 

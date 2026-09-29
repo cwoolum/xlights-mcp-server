@@ -147,7 +147,16 @@ def test_value_curves_are_explained_in_real_units():
     assert "E_VALUECURVE_<setting>" in text and "RV=TRUE" in text
     assert "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|Type=Ramp" in text
     assert "not percentages" in text
+    assert "check the ramp in xLights the first time" in text
+
+
+def test_value_curve_strings_are_only_copied_from_current_version_sequences():
+    text = render_sequence_song("Song.mp3", None, None)
+
+    assert "Copy working strings only from sequences saved in the current xLights version" in text
+    assert "`inspect_sequence` shows a sequence's `version`" in text
+    assert "check Min and Max against the units above" in text
 
 
 def test_music_sparkles_are_offered_on_palettes():
-    assert "`music_sparkles: true`" in render_sequence_song("Song.mp3", None, None)
+    assert "`music_sparkles: true` (with `sparkles` above 0)" in render_sequence_song("Song.mp3", None, None)

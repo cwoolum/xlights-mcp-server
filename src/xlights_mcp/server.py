@@ -710,8 +710,8 @@ async def write_sequence(
     - settings: {key: value} (values must be strings, numbers or booleans, and can't contain
       commas) or a raw "K=V,K=V" string.
     - palette: {"colors": ["#RRGGBB", ...] (1-8), "brightness": 0-400 (default 100),
-      "sparkles": 0-200 (default 0), "music_sparkles": true|false (default false)}; omitted
-      means a white palette.
+      "sparkles": 0-200 (default 0), "music_sparkles": true|false (default false, needs
+      sparkles above 0)}; omitted means a white palette.
 
     Times are rounded to the 25 ms frame grid and clipped to the song end (counted under
     "adjusted"). Any error writes nothing: overlapping placements on the same element and layer,
@@ -722,8 +722,10 @@ async def write_sequence(
     without overwrite. A group lit while a group or model inside it is also lit
     is a warning, and so is a Color Wash, Plasma or On with Normal blending that lies over an
     effect on a higher layer of the same element for that effect's whole duration (it is
-    completely hidden: put bases on the highest layer or give the upper effect a blend). The report lists at most 50 errors. Only the
-    elements the plan uses are written, and the file carries the installed xLights version.
+    completely hidden: put bases on the highest layer or give the upper effect a blend). So is
+    a palette with music_sparkles true and sparkles 0 (music sparkles need sparkles above 0).
+    The report lists at most 50 errors. Only the elements the plan uses are written, and the
+    file carries the installed xLights version.
 
     Args:
         mp3_path: The song; analysed first when it isn't cached (like get_beat_map)
