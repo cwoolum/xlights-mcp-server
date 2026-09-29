@@ -6,10 +6,10 @@ import bisect
 from collections.abc import Sequence
 
 from xlights_mcp.audio.analyzer import SongAnalysis
+from xlights_mcp.audio.drums import BEATS_PER_BAR
 from xlights_mcp.xlights.xsq_writer import TimingTrack, TimingTrackLabel
 
 FRAME_MS = 25
-BEATS_PER_BAR = 4
 TIMING_TRACK_NAMES = ("Beats", "Bars", "Drums", "Bass", "Instruments")
 _STEM_TRACKS = {"Drums": "drums", "Bass": "bass", "Instruments": "other"}
 _DOWNBEAT_TOLERANCE_S = 0.05
