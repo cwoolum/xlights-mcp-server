@@ -325,7 +325,7 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 | Verse, bridge, build, transition | Half of the feature groups (split by height, alternating each section) |
 | Chorus, drop, instrumental | The same, plus a short `On` on an accent prop at each downbeat, skipping props inside the lit groups |
 
-Feature-group effects follow the group's majority model type (arches get chases, trees get spirals, …): gentle effects below 0.65 energy, motion effects above. Singing-face models get a background plus a `Faces` effect driven by the assigned lyric track. Beats and Bars timing tracks are always added, and Drums, Bass and Instruments when stems are available. For anything richer, use the `sequence_song` prompt, which plans a hand-made-style sequence and writes it with `write_sequence`.
+Feature-group effects follow the group's majority model type (arches get chases, trees get spirals, …): gentle effects below 0.65 energy, motion effects above. Singing-face models get a background plus a `Faces` effect driven by the assigned lyric track. While faces are sequenced, groups containing a singing model are left out so nothing lights over the face; singing models are never used as accents. Beats and Bars timing tracks are added, plus Drums, Bass and Instruments when stems are available; a track named like a model or group is skipped, and a clashing lyric track is renamed. For anything richer, use the `sequence_song` prompt, which plans a hand-made-style sequence and writes it with `write_sequence`.
 
 ### File Format
 

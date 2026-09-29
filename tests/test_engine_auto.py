@@ -159,7 +159,9 @@ def test_singing_models_without_lyrics_get_no_effects_and_a_warning(click_track,
     result = _generate(click_track, singing_show, audio)
 
     assert any("Lyrics unavailable" in w for w in result["warnings"])
-    assert "Lantern2" not in _elements(result["output_path"]) or not _elements(result["output_path"])["Lantern2"]
+    elements = _elements(result["output_path"])
+    assert not elements.get("Lantern2")
+    assert sum(e.get("name") == "On" for effects in elements.values() for e in effects) == len(range(4, 20, 2))
 
 
 def test_singing_models_need_assignments_before_anything_is_written(click_track, singing_show, audio, monkeypatch):
@@ -179,6 +181,7 @@ def test_faces_are_sequenced_and_groups_holding_them_left_out(click_track, singi
     assert result["has_lyrics"] is True and result["singing_models"] == ["Lantern2"]
     elements = _elements(result["output_path"])
     assert any(e.get("name") == "Faces" for e in elements["Lantern2"])
+    assert not any(e.get("name") == "On" for e in elements["Lantern2"])
     assert not elements.get("Lanterns") and not elements.get("Everything Flat")
     assert "Vocals" in result["timing_tracks"]
 

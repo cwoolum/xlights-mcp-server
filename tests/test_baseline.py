@@ -110,6 +110,14 @@ def test_every_table_key_is_a_known_xlights_effect():
     assert {_effect_name_from_key(k) for k in keys} <= XLIGHTS_EFFECT_NAMES
 
 
+def test_accent_exclusions_skip_those_props_but_keep_their_groups():
+    plan = build_baseline_plan(ANALYSIS, SHOW, COLORS, accent_exclude=frozenset({"Lantern2"}))
+
+    assert "Lantern2" not in {p["element"] for p in plan}
+    assert "Lanterns" in {p["element"] for p in plan}
+    assert len([p for p in plan if p["layer"] == 1]) == len(range(20, 32, 2)) + len(range(40, 52, 2))
+
+
 def test_without_a_wash_group_quiet_sections_stay_dark():
     plan = _plan(exclude=frozenset({"Door L", "Lantern2"}))
 

@@ -417,8 +417,10 @@ def _generate_auto(
             song_end = last_frame_ms(analysis.duration_ms)
             lyric_tracks = [_lyric_timing_track(t, song_end) for t in vocal_tracks]
 
-    baseline = build_baseline_plan(analysis, show_config, colors, frozenset(singing) if faces else frozenset())
-    plan = [p for p in baseline if p["element"] not in singing] + faces
+    plan = build_baseline_plan(
+        analysis, show_config, colors, frozenset(singing) if faces else frozenset(),
+        accent_exclude=frozenset(singing),
+    ) + faces
     report = write_plan(
         plan, analysis, mp3_path, show_path,
         name=_free_sequence_name(show_path, mp3_path.stem),
@@ -556,7 +558,12 @@ def _placement(element: str, layer: int, key: str, start_ms: int, end_ms: int, p
 
 
 def build_baseline_plan(
-    analysis: SongAnalysis, show: ShowConfig, colors: list[str], exclude: frozenset[str] = frozenset()
+    analysis: SongAnalysis,
+    show: ShowConfig,
+    colors: list[str],
+    exclude: frozenset[str] = frozenset(),
+    *,
+    accent_exclude: frozenset[str] = frozenset(),
 ) -> list[dict]:
     """Plan placements for the baseline sequence.
 
@@ -564,7 +571,7 @@ def build_baseline_plan(
     light one half of the feature groups (by height), alternating; chorus, drop and instrumental
     sections add a short "On" on each downbeat, cycling through accent props that aren't inside
     the lit feature groups. Groups holding a model in `exclude` are left out, and so are those
-    models as accents.
+    models as accents; models in `accent_exclude` are only left out as accents.
     """
     layout = build_show_layout(show)
     leaves = {g.name: set(g.leaf_models) for g in show.model_groups}
@@ -575,7 +582,7 @@ def build_baseline_plan(
     halves = [features[:split], features[split:]]
     accent_pool = list(dict.fromkeys(
         prop for row in layout["groups"] if row["tier"] == "feature"
-        for prop in row["accent_props"] if prop not in exclude
+        for prop in row["accent_props"] if prop not in exclude and prop not in accent_exclude
     ))
     categories = _group_categories(show)
     palette = {"colors": colors}
