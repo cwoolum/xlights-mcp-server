@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xsequence BaseChannel="0" ChanCtrlBasic="0" ChanCtrlColor="0" FixedPointTiming="1" ModelBlending="true">
+  <head>
+    <version>2024.10</version>
+    <author>Test</author>
+    <song>Human Style</song>
+    <comment></comment>
+    <sequenceTiming>25 ms</sequenceTiming>
+    <sequenceType>Media</sequenceType>
+    <mediaFile>Human Style.mp3</mediaFile>
+    <sequenceDuration>10.000</sequenceDuration>
+  </head>
+  <ColorPalettes>
+    <ColorPalette>C_BUTTON_Palette1=#FFFFFF,C_CHECKBOX_Palette1=1</ColorPalette>
+  </ColorPalettes>
+  <EffectDB>
+    <Effect></Effect>
+  </EffectDB>
+  <DisplayElements>
+    <Element collapsed="0" type="timing" name="Beats" visible="1" views="" active="1"/>
+    <Element collapsed="0" type="model" name="House" visible="1"/>
+    <Element collapsed="0" type="model" name="Roof Edges" visible="1"/>
+    <Element collapsed="0" type="model" name="Lanterns" visible="1"/>
+    <Element collapsed="0" type="model" name="Lantern1" visible="1"/>
+    <Element collapsed="0" type="model" name="Door" visible="1"/>
+    <Element collapsed="0" type="model" name="Tree 6ft" visible="1"/>
+  </DisplayElements>
+  <ElementEffects>
+    <Element type="timing" name="Beats">
+      <EffectLayer>
+        <Effect label="1" startTime="0" endTime="500"/>
+        <Effect label="2" startTime="500" endTime="1000"/>
+      </EffectLayer>
+    </Element>
+    <Element type="model" name="House">
+      <EffectLayer>
+        <Effect ref="0" name="On" id="1" startTime="0" endTime="4000" palette="0"/>
+        <Effect ref="0" name="Color Wash" id="2" startTime="6500" endTime="10000" palette="0"/>
+      </EffectLayer>
+    </Element>
+    <Element type="model" name="Roof Edges">
+      <EffectLayer>
+        <Effect ref="0" name="SingleStrand" id="3" startTime="2000" endTime="6000" palette="0"/>
+      </EffectLayer>
+    </Element>
+    <Element type="model" name="Lanterns">
+      <EffectLayer>
+        <Effect ref="0" name="On" id="4" startTime="1000" endTime="1500" palette="0"/>
+        <Effect ref="0" name="Twinkle" id="5" startTime="3000" endTime="5000" palette="0"/>
+      </EffectLayer>
+    </Element>
+    <Element type="model" name="Lantern1">
+      <EffectLayer>
+        <Effect ref="0" name="Off" id="6" startTime="0" endTime="8000" palette="0"/>
+      </EffectLayer>
+      <EffectLayer>
+        <Effect ref="0" name="On" id="7" startTime="8000" endTime="9000" palette="0"/>
+      </EffectLayer>
+    </Element>
+    <Element type="model" name="Door">
+      <EffectLayer>
+        <Effect ref="0" name="On" id="8" startTime="0" endTime="2000" palette="0"/>
+        <Effect ref="0" name="On" id="9" startTime="1500" endTime="2500" palette="0"/>
+      </EffectLayer>
+    </Element>
+    <Element type="model" name="Tree 6ft">
+      <EffectLayer/>
+    </Element>
+  </ElementEffects>
+</xsequence>
