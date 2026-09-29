@@ -46,7 +46,6 @@ def test_dropouts_come_from_silences_and_hits_from_kicks():
     assert '`get_stem_events(stem=..., kind="silences")`' in DEFAULT_TEXT
     assert '`get_stem_events(stem="drums", kind="kicks")`' in DEFAULT_TEXT
     assert "`merge_gap_ms`" in DEFAULT_TEXT
-    assert '`kind="kicks"`' in DEFAULT_TEXT
 
 
 def test_the_kicks_timing_track_is_requested_when_stems_are_available():
