@@ -67,6 +67,15 @@ def test_latest_hand_made_sequence_falls_back_to_the_newest_animation(tmp_path):
     assert latest_hand_made_sequence(tmp_path) == newest
 
 
+def test_latest_hand_made_sequence_ignores_a_newer_generated_song(tmp_path):
+    animation = _typed(tmp_path / "Standby.xsq", "Animation", mtime=1_000_000)
+    generated = _generated(tmp_path / "Gen.xsq")
+    os.utime(generated, (2_000_000, 2_000_000))
+    assert b"<sequenceType>Media</sequenceType>" in generated.read_bytes()
+
+    assert latest_hand_made_sequence(tmp_path) == animation
+
+
 def test_latest_hand_made_sequence_is_none_without_one(tmp_path):
     _generated(tmp_path / "Gen.xsq")
 
