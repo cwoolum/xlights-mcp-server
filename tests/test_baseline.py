@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from show_fixtures import SHOW_GROUPS, make_analysis
@@ -19,6 +21,7 @@ from xlights_mcp.sequencer.engine import (
     build_baseline_plan,
 )
 from xlights_mcp.sequencer.plan import validate_plan
+from xlights_mcp.sequencer.plan_writer import write_plan
 from xlights_mcp.xlights.effects import XLIGHTS_EFFECT_NAMES
 from xlights_mcp.xlights.show import load_show_config
 
@@ -181,13 +184,45 @@ def test_face_backgrounds_skip_a_section_starting_in_the_last_frame():
     assert validate_plan(plan, SHOW, LAST_FRAME_SECTION.duration_ms, XLIGHTS_EFFECT_NAMES).errors == []
 
 
-def test_a_show_without_feature_groups_gets_no_feature_or_accent_placements():
-    show = SHOW.model_copy(update={"model_groups": [g for g in SHOW.model_groups if g.name in {"All", "Everything Flat"}]})
+WASH_ONLY = SHOW.model_copy(update={"model_groups": [g for g in SHOW.model_groups if g.name in {"All", "Everything Flat"}]})
+REAL_MODELS = {m.name for m in SHOW.real_models}
 
-    plan = build_baseline_plan(ANALYSIS, show, COLORS)
 
-    assert {(p["element"], p["layer"]) for p in plan} == {("Everything Flat", 0)}
-    assert len(plan) == 3
+def test_without_feature_groups_props_take_turns_by_height():
+    plan = build_baseline_plan(ANALYSIS, WASH_ONLY, COLORS, accent_exclude=frozenset({"Lantern2"}))
+
+    verse, chorus = ({p["element"] for p in _within(plan, s, e)} for s, e in [(8, 20), (20, 32)])
+    assert verse | chorus == REAL_MODELS - {"Lantern2"}
+    assert not verse & chorus
+    assert verse == {f"Pipe {i}" for i in range(1, 15)} - {"Pipe 9"}
+    assert {"Pipe 9", "Arch 1", "Tree 6ft", "Lantern3", "Roof Left"} <= chorus
+    assert {p["element"] for p in _within(plan, 0, 8)} == {"Everything Flat"}
+    assert {p["layer"] for p in plan} == {0}
+    result = validate_plan(plan, WASH_ONLY, 60000, XLIGHTS_EFFECT_NAMES)
+    assert (result.errors, result.warnings) == ([], [])
+
+
+def test_without_any_groups_quiet_sections_stay_dark_and_props_take_turns():
+    plan = build_baseline_plan(ANALYSIS, SHOW.model_copy(update={"model_groups": []}), COLORS)
+
+    assert _within(plan, 0, 8) == []
+    assert {p["element"] for p in plan} == REAL_MODELS
+
+
+def test_a_baseline_written_through_write_plan_needs_no_rounding(show_copy):
+    off = 0.013
+    analysis = make_analysis(
+        60.0, [], (np.arange(0, 60, 2.0) + off).tolist(),
+        sections=[
+            SongSection(label=l, start_time=s and s + off, end_time=min(e + off, 60.0), energy_level=en)
+            for l, s, e, en in SECTIONS
+        ],
+    )
+
+    report = write_plan(build_baseline_plan(analysis, SHOW, COLORS), analysis, Path("Song.mp3"), show_copy)
+
+    assert report["written"] is True
+    assert report["adjusted"]["rounded_to_frame"] == 0
 
 
 def test_chase_variants_use_the_textctrl_rotations_key():

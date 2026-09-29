@@ -626,7 +626,8 @@ async def create_sequence(
     "auto" writes a simple baseline: quiet sections (intro, outro, breakdown) get the
     largest wash group dimmed; other sections light half of the feature groups at a
     time, alternating by height; chorus, drop and instrumental sections add short hits
-    on accent props at each downbeat. It includes Beats and Bars timing tracks, plus
+    on accent props at each downbeat. Without feature groups, the show's props take
+    turns instead. It includes Beats and Bars timing tracks, plus
     Drums, Bass and Instruments when stems are available. It never overwrites an
     existing sequence; it picks "<song> (generated N)" instead. For a hand-made-style
     sequence, use the sequence_song prompt and write_sequence.

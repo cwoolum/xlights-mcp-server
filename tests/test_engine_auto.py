@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -81,6 +82,46 @@ def test_a_timing_track_named_like_a_show_element_is_left_out(click_track, show_
     assert result["success"] is True
     assert result["timing_tracks"] == ["Bars"]
     assert any("Beats timing track skipped" in w for w in result["warnings"])
+
+
+def test_a_show_without_groups_lets_props_take_turns(click_track, show_copy, audio):
+    xml = show_copy / "xlights_rgbeffects.xml"
+    text = xml.read_text(encoding="utf-8")
+    xml.write_text(re.sub(r"<modelGroup [^>]*/>", "", text), encoding="utf-8")
+
+    result = _generate(click_track, show_copy, audio)
+
+    assert result["success"] is True
+    assert any(w.startswith("No feature groups in this show; props take turns") for w in result["warnings"])
+    assert "No wash group, so intro/outro/breakdown sections stay dark" in result["warnings"]
+    elements = _elements(result["output_path"])
+    assert elements["Pipe 1"] and not elements.get("Roof Left")
+
+
+def test_a_show_of_only_silent_singers_is_an_error(tmp_path, click_track, audio, monkeypatch):
+    monkeypatch.setattr(engine, "_try_extract_vocal_tracks", lambda _path: [])
+    show = tmp_path / "singers"
+    show.mkdir()
+    (show / "xlights_rgbeffects.xml").write_text(
+        '<xrgb><models><model name="Singer" DisplayAs="Custom"><faceInfo Name="Face"/></model></models></xrgb>',
+        encoding="utf-8",
+    )
+
+    result = _generate(click_track, show, audio)
+
+    assert "get_show_layout" in result["error"] and "xlights-mcp.json" in result["error"]
+    assert list(show.glob("*.xsq")) == []
+
+
+def test_a_plan_the_writer_rejects_returns_its_errors(click_track, show_copy, audio, monkeypatch):
+    bad = {"element": "Nope", "effect": "On", "start_ms": 0, "end_ms": 1000}
+    monkeypatch.setattr(engine, "_baseline_placements", lambda *_a: [bad])
+
+    result = _generate(click_track, show_copy, audio)
+
+    assert set(result) == {"error", "errors", "warnings"}
+    assert "unknown element 'Nope'" in result["errors"][0]
+    assert list(show_copy.glob("*.xsq")) == []
 
 
 def test_never_overwrites_an_existing_sequence(click_track, show_copy, audio):

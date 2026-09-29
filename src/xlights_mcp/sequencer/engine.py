@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections import Counter
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from xlights_mcp.audio.analyzer import ProgressCallback, SongAnalysis, full_analysis
 from xlights_mcp.audio.lyrics import LyricTrack
@@ -351,7 +351,7 @@ def _face_placements(
             key = FACE_BED_KEYS[index % len(FACE_BED_KEYS)]
         plan.append(_placement(model, 0, key, *span, palette))
     plan.append({
-        "element": model, "layer": 1, "effect": "Faces", "start_ms": 0, "end_ms": analysis.duration_ms,
+        "element": model, "layer": 1, "effect": "Faces", "start_ms": 0, "end_ms": song_end,
         "settings": {
             "E_CHECKBOX_Faces_Outline": "1",
             "E_CHOICE_Faces_EyeBlinkDuration": "Normal",
@@ -432,10 +432,22 @@ def _generate_auto(
             song_end = last_frame_ms(analysis.duration_ms)
             lyric_tracks = [_lyric_timing_track(t, song_end) for t in vocal_tracks]
 
-    plan = build_baseline_plan(
-        analysis, show_config, colors, frozenset(singing) if faces else frozenset(),
-        accent_exclude=frozenset(singing),
-    ) + faces
+    cast = _baseline_cast(show_config, frozenset(singing) if faces else frozenset(), frozenset(singing))
+    if cast.props_take_turns:
+        warnings.append(
+            "No feature groups in this show; props take turns instead (see get_show_layout / xlights-mcp.json tiers)"
+        )
+    if cast.wash is None:
+        warnings.append("No wash group, so intro/outro/breakdown sections stay dark")
+    plan = _baseline_placements(analysis, cast, colors) + faces
+    if not plan:
+        return {
+            "error": (
+                "Nothing to light: the show has no usable groups or props for the baseline. "
+                "Check get_show_layout, and set group tiers in the show's xlights-mcp.json."
+            ),
+            "warnings": warnings,
+        }
     report = write_plan(
         plan, analysis, mp3_path, show_path,
         name=_free_sequence_name(show_path, mp3_path.stem),
@@ -444,7 +456,11 @@ def _generate_auto(
         show=show_config,
     )
     if not report["written"]:
-        return {"error": "The baseline plan failed validation.", "errors": report["errors"], "report": report}
+        return {
+            "error": "The baseline plan failed validation.",
+            "errors": report["errors"],
+            "warnings": warnings + report["warnings"],
+        }
 
     return {
         "success": True,
@@ -538,6 +554,40 @@ def _placement(element: str, layer: int, key: str, start_ms: int, end_ms: int, p
     }
 
 
+class _Cast(NamedTuple):
+    wash: dict | None
+    features: list[dict]
+    props_take_turns: bool
+    accent_pool: list[str]
+    leaves: dict[str, set[str]]
+    categories: dict[str, str]
+
+
+def _baseline_cast(show: ShowConfig, exclude: frozenset[str], accent_exclude: frozenset[str]) -> _Cast:
+    """Who lights in the baseline: the wash group, the feature rows by height, the accent props.
+
+    Without a usable feature group, the real models take turns instead, as one-prop rows.
+    """
+    layout = build_show_layout(show)
+    leaves = {g.name: set(g.leaf_models) for g in show.model_groups}
+    categories = _group_categories(show)
+    usable = [row for row in layout["groups"] if not leaves[row["name"]] & exclude]
+    wash = max((r for r in usable if r["tier"] == "wash"), key=lambda r: r["prop_count"], default=None)
+    features = [r for r in usable if r["tier"] == "feature"]
+    props_take_turns = not features
+    if props_take_turns:
+        props = [m for m in show.real_models if m.name not in exclude | accent_exclude]
+        y = {m.name: m.world_pos_y for m in props}
+        features = [{"name": m.name, "y_range": None if y[m.name] is None else (y[m.name], y[m.name])} for m in props]
+        leaves |= {m.name: {m.name} for m in props}
+        categories |= {m.name: m.model_category for m in props}
+    accent_pool = list(dict.fromkeys(
+        prop for row in layout["groups"] if row["tier"] == "feature"
+        for prop in row["accent_props"] if prop not in exclude and prop not in accent_exclude
+    ))
+    return _Cast(wash, sorted(features, key=_height_order), props_take_turns, accent_pool, leaves, categories)
+
+
 def build_baseline_plan(
     analysis: SongAnalysis,
     show: ShowConfig,
@@ -549,23 +599,18 @@ def build_baseline_plan(
     """Plan placements for the baseline sequence.
 
     Quiet sections (intro, outro, breakdown) get the largest wash group dimmed. Other sections
-    light one half of the feature groups (by height), alternating; chorus, drop and instrumental
-    sections add a short "On" on each downbeat, cycling through accent props that aren't inside
-    the lit feature groups. Groups holding a model in `exclude` are left out, and so are those
-    models as accents; models in `accent_exclude` are only left out as accents.
+    light one half of the feature groups (by height), alternating; without feature groups the
+    show's props take turns the same way. Chorus, drop and instrumental sections add a short
+    "On" on each downbeat, cycling through accent props that aren't inside the lit feature
+    groups. Groups holding a model in `exclude` are left out, and so are those models as
+    accents and props; models in `accent_exclude` are only left out as accents and props.
     """
-    layout = build_show_layout(show)
-    leaves = {g.name: set(g.leaf_models) for g in show.model_groups}
-    usable = [row for row in layout["groups"] if not leaves[row["name"]] & exclude]
-    wash = max((r for r in usable if r["tier"] == "wash"), key=lambda r: r["prop_count"], default=None)
-    features = sorted((r for r in usable if r["tier"] == "feature"), key=_height_order)
-    split = -(-len(features) // 2)
-    halves = [features[:split], features[split:]]
-    accent_pool = list(dict.fromkeys(
-        prop for row in layout["groups"] if row["tier"] == "feature"
-        for prop in row["accent_props"] if prop not in exclude and prop not in accent_exclude
-    ))
-    categories = _group_categories(show)
+    return _baseline_placements(analysis, _baseline_cast(show, exclude, accent_exclude), colors)
+
+
+def _baseline_placements(analysis: SongAnalysis, cast: _Cast, colors: list[str]) -> list[dict]:
+    split = -(-len(cast.features) // 2)
+    halves = [cast.features[:split], cast.features[split:]]
     palette = {"colors": colors}
     song_end = last_frame_ms(analysis.duration_ms)
 
@@ -578,9 +623,10 @@ def build_baseline_plan(
         start, end = span
         role = SECTION_TYPE_CONFIG.get(section.label, "features")
         if role == "wash":
-            if wash:
+            if cast.wash:
                 plan.append(_placement(
-                    wash["name"], 0, "ColorWash_slow", start, end, {"colors": colors, "brightness": WASH_BRIGHTNESS}
+                    cast.wash["name"], 0, "ColorWash_slow", start, end,
+                    {"colors": colors, "brightness": WASH_BRIGHTNESS},
                 ))
             continue
 
@@ -588,16 +634,16 @@ def build_baseline_plan(
         feature_turn += 1
         table = MOTION_EFFECTS if section.energy_level >= HIGH_ENERGY_THRESHOLD else BED_EFFECTS
         for turn, row in enumerate(lit, start=index):
-            choices = table.get(categories[row["name"]], table["other"])
+            choices = table.get(cast.categories[row["name"]], table["other"])
             plan.append(_placement(row["name"], 0, choices[turn % len(choices)], start, end, palette))
 
         if role == "accents":
-            lit_props = set().union(*(leaves[row["name"]] for row in lit))
-            pool = [p for p in accent_pool if p not in lit_props] or accent_pool
+            lit_props = set().union(*(cast.leaves[row["name"]] for row in lit))
+            pool = [p for p in cast.accent_pool if p not in lit_props] or cast.accent_pool
             for downbeat in analysis.beats.downbeat_times:
                 if pool and section.start_time <= downbeat < section.end_time:
-                    at = round(downbeat * 1000)
-                    if to_frame(at) >= song_end:
+                    at = to_frame(downbeat * 1000)
+                    if at >= song_end:
                         continue
                     plan.append(_placement(pool[accent_turn % len(pool)], 1, "On_solid", at, at + ACCENT_MS, palette))
                     accent_turn += 1
