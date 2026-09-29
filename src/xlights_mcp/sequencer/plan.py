@@ -14,8 +14,9 @@ from typing import TypeVar
 from xlights_mcp.sequencer.timing import last_frame_ms, to_frame
 from xlights_mcp.xlights.layout import contained_elements
 from xlights_mcp.xlights.models import ShowConfig
-from xlights_mcp.xlights.palettes import MAX_BRIGHTNESS, ColorPalette, brightness_curve_points
+from xlights_mcp.xlights.palettes import MAX_BRIGHTNESS, ColorPalette
 from xlights_mcp.xlights.show import is_submodel_ref
+from xlights_mcp.xlights.value_curves import custom_curve_points
 from xlights_mcp.xlights.xsq_writer import EffectPlacement
 
 MAX_LAYER = 2
@@ -247,8 +248,9 @@ def _palette(value, start: int, end: int, full_end: int) -> tuple[ColorPalette |
     brightness = value.get("brightness", 100)
     curve, warnings = None, []
     if isinstance(brightness, list):
-        points = _clipped_to(_curve_points(brightness, start, full_end), end)
-        curve, warnings = brightness_curve_points(points, start, end)
+        curve, warnings = custom_curve_points(
+            _curve_points(brightness, start, full_end), start, full_end, clip_end_ms=end
+        )
         brightness = 100
     else:
         brightness = _palette_int(value, "brightness", 100, MAX_BRIGHTNESS)
@@ -265,18 +267,6 @@ def _palette(value, start: int, end: int, full_end: int) -> tuple[ColorPalette |
 
 def _is_number(value) -> bool:
     return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
-
-
-def _clipped_to(points: list[tuple[int, float]], end: int) -> list[tuple[int, float]]:
-    kept = [p for p in points if p[0] <= end]
-    if len(kept) == len(points) or kept and kept[-1][0] == end:
-        return kept
-    after_t, after_level = points[len(kept)]
-    if not kept:
-        return [(end, after_level)]
-    before_t, before_level = kept[-1]
-    level = before_level + (after_level - before_level) * (end - before_t) / (after_t - before_t)
-    return [*kept, (end, level)]
 
 
 def _curve_points(points: list, start: int, end: int) -> list[tuple[int, float]]:

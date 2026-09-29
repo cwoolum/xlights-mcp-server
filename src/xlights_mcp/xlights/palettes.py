@@ -2,51 +2,13 @@
 
 from __future__ import annotations
 
-import math
 import re
 
 from pydantic import BaseModel, Field
 
-CURVE_SLOTS = 200
+from xlights_mcp.xlights.value_curves import custom_curve_string
+
 MAX_BRIGHTNESS = 400
-_SNAP_WARNING_MS = 25
-
-
-def brightness_curve_points(
-    points_ms: list[tuple[float, float]], start_ms: float, end_ms: float
-) -> tuple[list[tuple[float, float]], list[str]]:
-    """Snap ``(t_ms, level)`` points to the ``CURVE_SLOTS`` slots across an effect, as ``(x, level)`` pairs with warnings."""
-    length = end_ms - start_ms
-    slot_ms = length / CURVE_SLOTS
-    by_slot: dict[int, float] = {}
-    snapped = merged = False
-    previous_t: float | None = None
-    previous_slot = 0
-    for t, level in points_ms:
-        slot = math.floor((t - start_ms) / length * CURVE_SLOTS + 0.5)
-        if abs(slot * slot_ms - (t - start_ms)) > _SNAP_WARNING_MS:
-            snapped = True
-        if t == previous_t:
-            if previous_slot >= CURVE_SLOTS:
-                merged = merged or CURVE_SLOTS - 1 in by_slot
-                by_slot[CURVE_SLOTS - 1] = by_slot.pop(CURVE_SLOTS)
-                previous_slot = CURVE_SLOTS - 1
-            slot = previous_slot + 1
-        slot = max(slot, previous_slot)
-        if slot in by_slot:
-            merged = True
-        by_slot[slot] = level
-        previous_t, previous_slot = t, slot
-    by_slot.setdefault(0, by_slot[min(by_slot)])
-    by_slot.setdefault(CURVE_SLOTS, by_slot[max(by_slot)])
-    warnings = []
-    if snapped:
-        warnings.append(
-            f"brightness curve points snap to {slot_ms:.0f} ms steps on this {length / 1000:.1f} s effect"
-        )
-    if merged:
-        warnings.append(f"brightness points closer than one curve slot ({slot_ms:.0f} ms) were merged")
-    return [(slot / CURVE_SLOTS, by_slot[slot]) for slot in sorted(by_slot)], warnings
 
 
 class ColorPalette(BaseModel):
@@ -75,11 +37,8 @@ class ColorPalette(BaseModel):
             parts.append(f"C_CHECKBOX_Palette{idx}=1")
 
         if self.brightness_curve:
-            values = ";".join(f"{x:.3f}:{level / MAX_BRIGHTNESS:.4f}" for x, level in self.brightness_curve)
-            parts.append(
-                "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|Type=Custom"
-                f"|Min=0.00|Max={MAX_BRIGHTNESS:.2f}|RV=TRUE|Values={values}|"
-            )
+            curve = custom_curve_string("Brightness", 0, MAX_BRIGHTNESS, self.brightness_curve)
+            parts.append(f"C_VALUECURVE_Brightness={curve}")
         elif self.brightness != 100:
             parts.append(f"C_SLIDER_Brightness={self.brightness}")
 
