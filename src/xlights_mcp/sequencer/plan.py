@@ -104,7 +104,7 @@ def _placement(
     effect = _effect(raw.get("effect"), effect_names)
     start, end, rounded, clipped = _times(raw.get("start_ms"), raw.get("end_ms"), song_end)
     settings = _with_blend(_settings(raw.get("settings")), raw.get("blend"))
-    palette, curve_warnings = _palette(raw.get("palette"), start, end)
+    palette, curve_warnings = _palette(raw.get("palette"), start, end, to_frame(raw.get("end_ms")))
     placement = EffectPlacement(
         model_name=element,
         layer=layer,
@@ -232,7 +232,7 @@ def _with_blend(settings: dict[str, str], blend) -> dict[str, str]:
     return rest if canonical == "Normal" else {**rest, LAYER_METHOD_KEY: canonical}
 
 
-def _palette(value, start: int, end: int) -> tuple[ColorPalette | None, list[str]]:
+def _palette(value, start: int, end: int, full_end: int) -> tuple[ColorPalette | None, list[str]]:
     if value is None:
         return None, []
     if not isinstance(value, dict):
@@ -247,7 +247,8 @@ def _palette(value, start: int, end: int) -> tuple[ColorPalette | None, list[str
     brightness = value.get("brightness", 100)
     curve, warnings = None, []
     if isinstance(brightness, list):
-        curve, warnings = brightness_curve_points(_curve_points(brightness, start, end), start, end)
+        points = _clipped_to(_curve_points(brightness, start, full_end), end)
+        curve, warnings = brightness_curve_points(points, start, end)
         brightness = 100
     else:
         brightness = _palette_int(value, "brightness", 100, MAX_BRIGHTNESS)
@@ -264,6 +265,18 @@ def _palette(value, start: int, end: int) -> tuple[ColorPalette | None, list[str
 
 def _is_number(value) -> bool:
     return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
+
+
+def _clipped_to(points: list[tuple[int, float]], end: int) -> list[tuple[int, float]]:
+    kept = [p for p in points if p[0] <= end]
+    if len(kept) == len(points) or kept and kept[-1][0] == end:
+        return kept
+    after_t, after_level = points[len(kept)]
+    if not kept:
+        return [(end, after_level)]
+    before_t, before_level = kept[-1]
+    level = before_level + (after_level - before_level) * (end - before_t) / (after_t - before_t)
+    return [*kept, (end, level)]
 
 
 def _curve_points(points: list, start: int, end: int) -> list[tuple[int, float]]:

@@ -514,3 +514,25 @@ def test_a_brightness_curve_in_settings_is_rejected(settings):
     error = _validate(_p(settings=settings)).errors[0]
 
     assert "put brightness curves in palette.brightness, not settings" in error
+
+
+def test_a_curve_on_a_placement_clipped_to_the_song_end_is_cut_at_the_end():
+    result = _validate(_curve([[1000, 100], [2000, 300]], start_ms=1000, end_ms=2000), duration_ms=1500)
+
+    assert result.errors == []
+    assert result.placements[0].end_time_ms == 1500
+    assert result.placements[0].palette.brightness_curve == [(0.0, 100), (1.0, 200)]
+
+
+def test_a_clipped_curve_drops_the_points_after_the_song_end():
+    points = [[1000, 100], [1400, 100], [1600, 200], [2000, 300]]
+
+    curve = _validate(_curve(points, start_ms=1000, end_ms=2000), duration_ms=1500).placements[0].palette.brightness_curve
+
+    assert [(round(x * 200), level) for x, level in curve] == [(0, 100), (160, 100), (200, 150)]
+
+
+def test_a_clipped_curve_that_starts_after_the_song_end_points_holds_its_first_value():
+    curve = _validate(_curve([[1600, 250], [2000, 300]], start_ms=1000, end_ms=2000), duration_ms=1500).placements[0].palette.brightness_curve
+
+    assert curve == [(0.0, 250), (1.0, 250)]
