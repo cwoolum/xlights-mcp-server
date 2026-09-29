@@ -14,6 +14,7 @@ class ColorPalette(BaseModel):
     active_colors: list[int] = Field(default_factory=list)  # which palette slots are active
     sparkle_frequency: int = 0
     sparkle_color: str = ""
+    music_sparkles: bool = False
     brightness: int = 100
 
     def to_xlights_string(self) -> str:
@@ -36,6 +37,8 @@ class ColorPalette(BaseModel):
         # Sparkle
         if self.sparkle_frequency > 0:
             parts.append(f"C_SLIDER_SparkleFrequency={self.sparkle_frequency}")
+        if self.music_sparkles:
+            parts.append("C_CHECKBOX_MusicSparkles=1")
         if self.sparkle_color:
             parts.append(f"C_COLOURPICKERCTRL_SparklesColour={self.sparkle_color}")
 

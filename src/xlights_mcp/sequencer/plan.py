@@ -18,8 +18,14 @@ from xlights_mcp.xlights.show import is_submodel_ref
 from xlights_mcp.xlights.xsq_writer import EffectPlacement
 
 MAX_LAYER = 2
-_PLACEMENT_KEYS = ("element", "layer", "effect", "start_ms", "end_ms", "settings", "palette")
-_PALETTE_KEYS = ("colors", "brightness", "sparkles")
+BLEND_MODES: tuple[str, ...] = (
+    "Normal", "Effect 1", "Effect 2", "1 is Mask", "2 is Mask", "1 is Unmask", "2 is Unmask",
+    "1 is True Unmask", "2 is True Unmask", "1 reveals 2", "2 reveals 1", "Shadow 1 on 2", "Shadow 2 on 1",
+    "Layered", "Average", "Bottom-Top", "Left-Right", "Additive", "Subtractive", "Brightness", "Max", "Min",
+)
+LAYER_METHOD_KEY = "T_CHOICE_LayerMethod"
+_PLACEMENT_KEYS = ("element", "layer", "effect", "start_ms", "end_ms", "settings", "palette", "blend")
+_PALETTE_KEYS = ("colors", "brightness", "sparkles", "music_sparkles")
 PARENT_CHILD_PAIRS_LISTED = 10
 _EFFECT_HINTS = {
     "chase": ("SingleStrand", " (Chase is a SingleStrand mode: E_NOTEBOOK_SSEFFECT_TYPE=Chase)"),
@@ -91,7 +97,7 @@ def _placement(
         effect_name=effect,
         start_time_ms=start,
         end_time_ms=end,
-        settings=_settings(raw.get("settings")),
+        settings=_with_blend(_settings(raw.get("settings")), raw.get("blend")),
         palette=_palette(raw.get("palette")),
     )
     return placement, rounded, clipped
@@ -194,6 +200,21 @@ def _settings_text(key, value) -> str:
     return text
 
 
+def _with_blend(settings: dict[str, str], blend) -> dict[str, str]:
+    if blend is None:
+        return settings
+    if not isinstance(blend, str):
+        raise PlanError(f"blend must be one of {', '.join(BLEND_MODES)}, got {blend!r}")
+    canonical = {mode.lower(): mode for mode in BLEND_MODES}.get(blend.lower())
+    if canonical is None:
+        raise PlanError(f"unknown blend {blend!r}{_suggest(blend, BLEND_MODES)}")
+    if LAYER_METHOD_KEY in settings:
+        raise PlanError(f"use blend or {LAYER_METHOD_KEY}, not both")
+    if canonical == "Normal":
+        return settings
+    return {**settings, LAYER_METHOD_KEY: canonical}
+
+
 def _palette(value) -> ColorPalette | None:
     if value is None:
         return None
@@ -211,7 +232,14 @@ def _palette(value) -> ColorPalette | None:
         active_colors=list(range(1, len(colors) + 1)),
         brightness=_palette_int(value, "brightness", 100, 400),
         sparkle_frequency=_palette_int(value, "sparkles", 0, 200),
+        music_sparkles=_music_sparkles(value.get("music_sparkles", False)),
     )
+
+
+def _music_sparkles(value) -> bool:
+    if not isinstance(value, bool):
+        raise PlanError(f"palette.music_sparkles must be true or false, got {value!r}")
+    return value
 
 
 def _palette_int(palette: dict, key: str, default: int, upper: int) -> int:

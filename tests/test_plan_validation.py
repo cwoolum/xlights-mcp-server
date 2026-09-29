@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from xlights_mcp.sequencer.plan import validate_plan
+from xlights_mcp.sequencer.plan import BLEND_MODES, validate_plan
 from xlights_mcp.xlights.effects import XLIGHTS_EFFECT_NAMES
 from xlights_mcp.xlights.show import load_show_config
 
@@ -260,3 +260,54 @@ def test_parent_child_warnings_list_the_first_ten_pairs():
 
     assert len(result.warnings) == 11
     assert result.warnings[-1] == "... and 1 more parent/child pair lit together"
+
+
+def test_blend_sets_the_layer_method_setting():
+    placement = _validate(_p(blend="Additive", settings={"E_A": "1"})).placements[0]
+
+    assert placement.settings == {"E_A": "1", "T_CHOICE_LayerMethod": "Additive"}
+
+
+def test_normal_blend_and_no_blend_write_nothing():
+    for blend in ("Normal", "normal", None):
+        assert _validate(_p(blend=blend) if blend else _p()).placements[0].settings == {}
+
+
+def test_blend_is_matched_case_insensitively_and_normalised():
+    assert _validate(_p(blend="1 REVEALS 2")).placements[0].settings["T_CHOICE_LayerMethod"] == "1 reveals 2"
+
+
+def test_an_unknown_blend_suggests_close_names():
+    error = _validate(_p(blend="Additiv")).errors[0]
+
+    assert "unknown blend 'Additiv'" in error and "'Additive'" in error
+
+
+def test_blend_must_be_a_string():
+    assert "blend" in _validate(_p(blend=3)).errors[0]
+
+
+def test_blend_and_the_layer_method_setting_together_are_an_error():
+    error = _validate(_p(blend="Additive", settings={"T_CHOICE_LayerMethod": "Max"})).errors[0]
+
+    assert "use blend or T_CHOICE_LayerMethod, not both" in error
+
+
+def test_blend_modes_match_the_xlights_list():
+    assert len(BLEND_MODES) == 22
+    assert BLEND_MODES[:3] == ("Normal", "Effect 1", "Effect 2")
+    assert BLEND_MODES[-1] == "Min"
+
+
+def test_music_sparkles_maps_onto_the_palette():
+    palette = _validate(_p(palette={"colors": ["#FFFFFF"], "music_sparkles": True})).placements[0].palette
+
+    assert palette.music_sparkles is True
+    assert _validate(_p(palette={"colors": ["#FFFFFF"]})).placements[0].palette.music_sparkles is False
+
+
+@pytest.mark.parametrize("value", [1, "true", None])
+def test_music_sparkles_must_be_a_boolean(value):
+    error = _validate(_p(palette={"colors": ["#FFFFFF"], "music_sparkles": value})).errors[0]
+
+    assert "music_sparkles" in error
