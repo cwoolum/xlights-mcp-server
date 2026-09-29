@@ -271,3 +271,12 @@ Manual checks (not CI):
 - `create_sequence` on Ghosts 'n' Stuff writes with zero errors, and the file opens in xLights.
 
 All existing tests must still pass.
+
+## Implementation notes (PR 3)
+
+- `sequence_song` picks the default reference and embeds the show's `.claude/CLAUDE.md` on the server, since many MCP clients can't read files. The default is the newest hand-made sequence of type Media (song), falling back to any hand-made sequence. "Hand-made" means "not written by this server's generator"; sequences scripted elsewhere count as hand-made.
+- Baseline accents skip props inside the feature groups lit at that moment, so they don't trip the parent/child warning. Singing models are never accents.
+- `SECTION_TYPE_CONFIG` is now the baseline's section-role table (wash / features / accents).
+- Feature effects come from `MOTION_EFFECTS` in high-energy sections and `BED_EFFECTS` otherwise. Warp was dropped from the tables because it needs layers below it.
+- `profile_sequence` also reports `timing_tracks`, `unknown` elements (not in the show), `sub_effects` (effects on strands, nodes and submodels) and an `other_elements` summary past the 20-row cap. Parent share follows group nesting, so `All` reads lower than a props-based measure: 17% vs 39% on Remains of the Day, 30% vs 50% on Into the Unknown.
+- The baseline skips timing tracks whose names match a model or group, renames clashing lyric tracks, and warns about `vocal_assignments` that don't match a track or singing model.
