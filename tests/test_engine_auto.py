@@ -92,7 +92,7 @@ def test_a_show_without_groups_lets_props_take_turns(click_track, show_copy, aud
     result = _generate(click_track, show_copy, audio)
 
     assert result["success"] is True
-    assert any(w.startswith("No feature groups in this show; props take turns") for w in result["warnings"])
+    assert any(w.startswith("No usable feature groups") for w in result["warnings"])
     assert "No wash group, so intro/outro/breakdown sections stay dark" in result["warnings"]
     elements = _elements(result["output_path"])
     assert elements["Pipe 1"] and not elements.get("Roof Left")

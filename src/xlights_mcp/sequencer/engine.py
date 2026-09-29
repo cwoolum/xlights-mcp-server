@@ -435,7 +435,7 @@ def _generate_auto(
     cast = _baseline_cast(show_config, frozenset(singing) if faces else frozenset(), frozenset(singing))
     if cast.props_take_turns:
         warnings.append(
-            "No feature groups in this show; props take turns instead (see get_show_layout / xlights-mcp.json tiers)"
+            "No usable feature groups (none, or all hold singing models); props take turns instead (see get_show_layout / xlights-mcp.json tiers)"
         )
     if cast.wash is None:
         warnings.append("No wash group, so intro/outro/breakdown sections stay dark")
