@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import logging
 import random
+from collections import Counter
 from pathlib import Path
+from typing import Literal
 
 from xlights_mcp.audio.analyzer import ProgressCallback, SongAnalysis, StemAnalysis, full_analysis
 from xlights_mcp.audio.structure import SongSection
 from xlights_mcp.config import AudioConfig
-from xlights_mcp.xlights.layout import show_tiers
+from xlights_mcp.xlights.layout import build_show_layout, show_tiers
 from xlights_mcp.xlights.models import LightModel, ShowConfig
 from xlights_mcp.xlights.palettes import DEFAULT_PALETTE, get_theme_palettes
 from xlights_mcp.xlights.show import load_show_config
@@ -217,7 +219,7 @@ MOTION_EFFECTS: dict[str, list[str]] = {
     "single_line": ["Chase_left", "Chase_right", "Chase_bounce"],
     "poly_line": ["Chase_left", "Chase_right", "Chase_from_middle"],
     "window": ["Marquee_default"],
-    "custom": ["Plasma_fast", "Warp_mirror", "Warp_wavy"],
+    "custom": ["Plasma_fast", "Butterfly_gentle"],
     "other": ["Chase_from_middle", "ColorWash_fast"],
 }
 
@@ -310,6 +312,18 @@ SECTION_TYPE_CONFIG: dict[str, dict] = {
 SECTION_TYPE_CONFIG["build"] = SECTION_TYPE_CONFIG["transition"]
 SECTION_TYPE_CONFIG["drop"] = SECTION_TYPE_CONFIG["chorus"]
 SECTION_TYPE_CONFIG["breakdown"] = SECTION_TYPE_CONFIG["bridge"]
+
+SectionRole = Literal["wash", "features", "accents"]
+
+SECTION_ROLES: dict[str, SectionRole] = {
+    "intro": "wash", "outro": "wash", "breakdown": "wash",
+    "chorus": "accents", "drop": "accents", "instrumental": "accents",
+    "verse": "features", "bridge": "features", "build": "features",
+    "transition": "features", "unknown": "features",
+}
+ACCENT_MS = 100
+WASH_BRIGHTNESS = 40
+FACE_BED_KEYS = ("Twinkle_ambient", "ColorWash_cycling", "Butterfly_gentle")
 
 
 # ---------------------------------------------------------------------------
@@ -982,6 +996,84 @@ def _effect_name_from_key(variant_key: str) -> str:
         "On_solid": "On",
     }
     return key_to_effect.get(variant_key, variant_key.split("_")[0])
+
+
+def _height_order(row: dict) -> tuple:
+    y_range = row["y_range"]
+    return (y_range[0], y_range[1], row["name"]) if y_range else (float("inf"), float("inf"), row["name"])
+
+
+def _group_categories(show: ShowConfig) -> dict[str, str]:
+    by_name = {m.name: m for m in show.models}
+    categories = {}
+    for group in show.model_groups:
+        cats = [by_name[n].model_category for n in group.leaf_models if n in by_name]
+        categories[group.name] = Counter(cats).most_common(1)[0][0] if cats else "other"
+    return categories
+
+
+def _placement(element: str, layer: int, key: str, start_ms: int, end_ms: int, palette: dict) -> dict:
+    return {
+        "element": element, "layer": layer, "effect": _effect_name_from_key(key),
+        "start_ms": start_ms, "end_ms": end_ms, "settings": _get_settings(key), "palette": palette,
+    }
+
+
+def build_baseline_plan(
+    analysis: SongAnalysis, show: ShowConfig, colors: list[str], exclude: frozenset[str] = frozenset()
+) -> list[dict]:
+    """Plan placements for the baseline sequence.
+
+    Quiet sections (intro, outro, breakdown) get the largest wash group dimmed. Other sections
+    light one half of the feature groups (by height), alternating; chorus, drop and instrumental
+    sections add a short "On" on each downbeat, cycling through accent props that aren't inside
+    the lit feature groups. Groups holding a model in `exclude` are left out, and so are those
+    models as accents.
+    """
+    layout = build_show_layout(show)
+    leaves = {g.name: set(g.leaf_models) for g in show.model_groups}
+    usable = [row for row in layout["groups"] if not leaves[row["name"]] & exclude]
+    wash = max((r for r in usable if r["tier"] == "wash"), key=lambda r: r["prop_count"], default=None)
+    features = sorted((r for r in usable if r["tier"] == "feature"), key=_height_order)
+    split = -(-len(features) // 2)
+    halves = [features[:split], features[split:]]
+    accent_pool = list(dict.fromkeys(
+        prop for row in layout["groups"] if row["tier"] == "feature"
+        for prop in row["accent_props"] if prop not in exclude
+    ))
+    categories = _group_categories(show)
+    palette = {"colors": colors}
+
+    plan: list[dict] = []
+    feature_turn = accent_turn = 0
+    for index, section in enumerate(analysis.sections):
+        start, end = section.start_time_ms, section.end_time_ms
+        if end <= start:
+            continue
+        role = SECTION_ROLES.get(section.label, "features")
+        if role == "wash":
+            if wash:
+                plan.append(_placement(
+                    wash["name"], 0, "ColorWash_slow", start, end, {"colors": colors, "brightness": WASH_BRIGHTNESS}
+                ))
+            continue
+
+        lit = halves[feature_turn % 2] or halves[0]
+        feature_turn += 1
+        table = MOTION_EFFECTS if section.energy_level >= HIGH_ENERGY_THRESHOLD else BED_EFFECTS
+        for turn, row in enumerate(lit, start=index):
+            choices = table.get(categories[row["name"]], table["other"])
+            plan.append(_placement(row["name"], 0, choices[turn % len(choices)], start, end, palette))
+
+        if role == "accents":
+            lit_props = set().union(*(leaves[row["name"]] for row in lit))
+            pool = [p for p in accent_pool if p not in lit_props] or accent_pool
+            for downbeat in analysis.beats.downbeat_times:
+                if pool and section.start_time <= downbeat < section.end_time:
+                    at = round(downbeat * 1000)
+                    plan.append(_placement(pool[accent_turn % len(pool)], 1, "On_solid", at, at + ACCENT_MS, palette))
+                    accent_turn += 1
+    return plan
 
 
 def _precompute_section_beats(analysis: SongAnalysis) -> dict[int, list[float]]:
