@@ -227,11 +227,11 @@ def _show_file(show_path: Path, value: str, suffix: str = "") -> Path:
 Use it:
 - **`inspect_sequence`:** replace `xsq_path = show_path / f"{sequence_name}.xsq"` with `xsq_path = _show_file(show_path, sequence_name, ".xsq")`. Also switch its "No active show configured" guard to the shared `_active_show(config)` helper, as the other tools use it.
 - **`write_sequence`:** replace the `plan_path` block's manual `plan_file = Path(plan_path).expanduser(); if not plan_file.is_absolute(): …` with `plan_file = _show_file(show_path, plan_path)`.
-- **`list_sequences`:** each entry becomes the following. Add `from datetime import datetime` at the top of server.py and import `is_generated_file` inside the function, the way other tools import lazily.
+- **`list_sequences`:** each entry becomes the following. Add `from datetime import datetime, timezone` at the top of server.py and import `is_generated_file` inside the function, the way other tools import lazily.
 
 ```python
 {"name": xsq.stem, "path": str(xsq), "generated": is_generated_file(xsq),
- "modified": datetime.fromtimestamp(xsq.stat().st_mtime).isoformat(timespec="seconds")}
+ "modified": datetime.fromtimestamp(xsq.stat().st_mtime, tz=timezone.utc).astimezone().isoformat(timespec="seconds")}
 ```
 
 Update `list_sequences`' docstring: `generated` is true for sequences written by `create_sequence`/`write_sequence`, false for hand-made ones.
@@ -752,7 +752,7 @@ def profile_sequence(xsq_path: str) -> dict:
         return {"error": f"Sequence not found: {path}"}
     try:
         return build_profile(path, load_show_config(show_path))
-    except ET.ParseError as e:
+    except (ET.ParseError, ValueError) as e:
         return {"error": f"Could not parse {path.name}: {e}"}
 ```
 
@@ -1000,6 +1000,14 @@ def test_groups_holding_excluded_models_are_left_out():
     assert {p["element"] for p in _within(plan, 0, 8)} == {"House"}
 
 
+def test_every_table_key_is_a_known_xlights_effect():
+    from xlights_mcp.sequencer.engine import BED_EFFECTS, FACE_BED_KEYS, MOTION_EFFECTS, _effect_name_from_key
+
+    keys = {k for table in (BED_EFFECTS, MOTION_EFFECTS) for ks in table.values() for k in ks}
+    keys |= {"ColorWash_slow", "On_solid", "Twinkle_dense", *FACE_BED_KEYS}
+    assert {_effect_name_from_key(k) for k in keys} <= XLIGHTS_EFFECT_NAMES
+
+
 def test_without_a_wash_group_quiet_sections_stay_dark():
     plan = _plan(exclude=frozenset({"Door L", "Lantern2"}))
 
@@ -1018,7 +1026,7 @@ Before you run them, check the expectations against the implementation below:
 - [ ] **Step 2: Run to verify failure**
 
 Run: `.venv/Scripts/python -m pytest tests/test_baseline.py -q`
-Expected: ImportError.
+Expected: ImportError. Also add `FACE_BED_KEYS = ("Twinkle_ambient", "ColorWash_cycling", "Butterfly_gentle")` to engine.py in this task (Task 6's face code reuses it).
 
 - [ ] **Step 3: Implement in `engine.py`**
 
@@ -1143,7 +1151,7 @@ git commit -m "build_baseline_plan: features take turns, accents on downbeats, w
 
 **Files:**
 - Modify: `src/xlights_mcp/sequencer/engine.py`, `src/xlights_mcp/sequencer/plan_writer.py`, `src/xlights_mcp/server.py` (`create_sequence` docstring), `README.md` (`create_sequence` row)
-- Modify tests: `tests/test_engine_groups.py`, `tests/test_engine_write.py`, `tests/test_engine_labels.py`
+- Modify tests: `tests/test_engine_groups.py`, `tests/test_engine_write.py`
 - Test: `tests/test_engine_auto.py` (create)
 
 - [ ] **Step 1: Write the failing tests** (`tests/test_engine_auto.py`)
@@ -1297,17 +1305,16 @@ Expected: failures, because the old engine returns different keys.
    - the old `SECTION_TYPE_CONFIG` dict and its three alias lines
    - `_LEGACY_GROUP_PATTERNS`, `_detect_model_groups`, `_precompute_section_beats`, `_precompute_section_downbeats`
    - the whole old `_generate_auto`
-   - the imports that become unused: `random`, `StemAnalysis`, `SongSection` if unused, `show_tiers`, `SequenceSpec`, `TimingTrackLabel` if unused, `write_xsq`, `LightModel`
+   - the imports that become unused: `random`, `StemAnalysis`, `SongSection` if unused, `show_tiers`, `SequenceSpec`, `EffectPlacement`, `write_xsq`, `LightModel`, `get_theme_palettes`. Run `.venv/Scripts/python -m ruff check src/xlights_mcp/sequencer/engine.py` and remove anything F401 reports
    - `EFFECT_VARIANTS` entries and `_effect_name_from_key` entries that no remaining code references (Shockwave_hit, Morph_quick, Meteors_explode, Warp_*). Check what's still used with grep before deleting each one.
 
-   Rename `SECTION_ROLES` to `SECTION_TYPE_CONFIG`. Update `build_baseline_plan` and `tests/test_engine_labels.py`; it still imports `SECTION_TYPE_CONFIG` and its assertion still holds.
+   Rename `SECTION_ROLES` to `SECTION_TYPE_CONFIG` and update `build_baseline_plan`. `tests/test_engine_labels.py` imports `SECTION_TYPE_CONFIG` and needs no change.
 2. **Keep:** `generate_sequence`, `preview_sequence_plan`, `_generate_guided_preview`, `_get_settings`, `_effect_name_from_key`, `_try_extract_lyrics`, `_try_extract_vocal_tracks`, `EFFECT_VARIANTS`, `BED_EFFECTS`, `MOTION_EFFECTS`, `HIGH_ENERGY_THRESHOLD` and `LOW_ENERGY_THRESHOLD`.
 3. **Module docstring:** replace it with a short one: "Sequence generation: the create_sequence baseline plan, singing faces, and the guided preview."
 4. **`generate_sequence`:** change `if not show_config.models:` to `if not show_config.real_models:` with the error `"No models with lights found in show configuration"`.
 5. **Add the new auto path:**
 
 ```python
-FACE_BED_KEYS = ("Twinkle_ambient", "ColorWash_cycling", "Butterfly_gentle")
 STEM_TIMING_TRACKS = ("Drums", "Bass", "Instruments")
 
 
@@ -1335,6 +1342,8 @@ def _face_placements(analysis: SongAnalysis, model: str, face_definition: str, t
     palette = {"colors": colors}
     plan = []
     for index, section in enumerate(analysis.sections):
+        if section.end_time_ms <= section.start_time_ms:
+            continue
         if section.energy_level >= HIGH_ENERGY_THRESHOLD:
             key = "Twinkle_dense"
         elif section.energy_level < LOW_ENERGY_THRESHOLD:
@@ -1406,7 +1415,8 @@ def _generate_auto(
                 faces.extend(_face_placements(analysis, model, face_definition, track.track_name, colors))
             lyric_tracks = [_lyric_timing_track(t) for t in vocal_tracks]
 
-    plan = build_baseline_plan(analysis, show_config, colors, frozenset(singing) if faces else frozenset()) + faces
+    baseline = build_baseline_plan(analysis, show_config, colors, frozenset(singing) if faces else frozenset())
+    plan = [p for p in baseline if p["element"] not in singing] + faces
     stems = STEM_TIMING_TRACKS if analysis.stem_analysis.available else ()
     report = write_plan(
         plan, analysis, mp3_path, show_path,
@@ -1463,7 +1473,7 @@ def test_baseline_honors_tier_overrides(tmp_path):
     assert "Pipes-Odd" in elements
 ```
 
-   With 6 features (Pipes [5], Pipes-Odd [5], Legacy Arches [10], Door [20], Lanterns [90], Roof Edges [120]), the two verse sections light both halves, so every feature group appears. Import `make_analysis` from `show_fixtures` and `SongSection` from `xlights_mcp.audio.sections`.
+   With 6 features (Pipes [5], Pipes-Odd [5], Legacy Arches [10], Door [20], Lanterns [90], Roof Edges [120]), the two verse sections light both halves, so every feature group appears. Import `make_analysis` from `show_fixtures`, `SongSection` from `xlights_mcp.audio.sections` and `build_baseline_plan` from `xlights_mcp.sequencer.engine`, and update the module docstring to "The baseline and guided preview honour the show's groups, tiers and placeholders."
 7. **`tests/test_engine_write.py`:** keep the test and its assertions. It still passes because every writer effect carries `ref` and `palette`. Add `assert result["success"] is True` at the end.
 8. **`server.py` `create_sequence` docstring:** rewrite it to describe the baseline:
    - "auto" writes a simple baseline: quiet sections (intro, outro, breakdown) get the largest wash group dimmed; other sections light half of the feature groups at a time, alternating by height; chorus, drop and instrumental sections add short hits on accent props at each downbeat.
@@ -1472,7 +1482,7 @@ def test_baseline_honors_tier_overrides(tmp_path):
    - For a hand-made-style sequence, use the `sequence_song` prompt and `write_sequence`.
    - `palette_hint` takes colour names (red, green, blue, white, warm white, yellow, orange, gold, purple, pink, magenta, cyan, ice) or `#RRGGBB`, separated by commas and/or "and". Unrecognised words are reported and ignored. With no usable hint, the theme's palette is used.
    - Keep the `mode`, `theme`, `vocal_assignments` and `show_name` descriptions.
-9. **README:** change the `create_sequence` row to: "Generate a baseline `.xsq` from an `.mp3`: wash in quiet sections, feature groups taking turns, accents on downbeats (use the `sequence_song` prompt for hand-made-style sequences)".
+9. **README:** update the "How It Works → Effect Selection Logic" section and the "Sequence Generation" feature bullets to describe the baseline instead of the removed per-model engine; keep it short. Also change the `create_sequence` row to: "Generate a baseline `.xsq` from an `.mp3`: wash in quiet sections, feature groups taking turns, accents on downbeats (use the `sequence_song` prompt for hand-made-style sequences)".
 
 - [ ] **Step 4: Run to verify pass**
 
@@ -1482,7 +1492,7 @@ Expected: all pass. Then run the full suite: `.venv/Scripts/python -m pytest -q`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/xlights_mcp/sequencer/engine.py src/xlights_mcp/sequencer/plan_writer.py src/xlights_mcp/server.py README.md tests/test_engine_auto.py tests/test_engine_groups.py tests/test_engine_write.py tests/test_engine_labels.py
+git add src/xlights_mcp/sequencer/engine.py src/xlights_mcp/sequencer/plan_writer.py src/xlights_mcp/server.py README.md tests/test_engine_auto.py tests/test_engine_groups.py tests/test_engine_write.py
 git commit -m "create_sequence auto: baseline plan and singing faces written through write_plan"
 ```
 
@@ -1502,7 +1512,7 @@ git commit -m "create_sequence auto: baseline plan and singing faces written thr
 
 from __future__ import annotations
 
-import os
+import re
 import shutil
 from pathlib import Path
 
@@ -1520,7 +1530,7 @@ def test_renders_every_placeholder():
     text = render_sequence_song("C:/music/Song.mp3", None, None)
 
     assert "C:/music/Song.mp3" in text
-    assert "{{" not in text and "}}" not in text
+    assert not re.search(r"\{\{\w+\}\}", text)
 
 
 def test_a_reference_is_profiled():
@@ -1616,7 +1626,10 @@ _WITHOUT_REFERENCE = (
 
 def render_sequence_song(mp3_path: str, reference: str | None, show_notes: str | None) -> str:
     """The sequence_song playbook for a song, a reference sequence and the show's notes."""
-    notes = f"\n### Show notes\n\nThe show folder's `.claude/CLAUDE.md` says:\n\n{show_notes.strip()}\n" if show_notes else ""
+    notes = (
+        f"\n### Show notes\n\nThe show folder's `.claude/CLAUDE.md` says the following; follow it:\n\n{show_notes.strip()}\n"
+        if show_notes else ""
+    )
     return (
         _SEQUENCE_SONG.read_text(encoding="utf-8")
         .replace("{{mp3_path}}", mp3_path)
@@ -1705,7 +1718,7 @@ def sequence_song(mp3_path: str, reference_sequence: str | None = None) -> str:
     show_path = get_config().active_show_path
     reference, notes = reference_sequence, None
     if show_path and show_path.exists():
-        if reference is None:
+        if not reference:
             latest = latest_hand_made_sequence(show_path)
             reference = latest.name if latest else None
         notes_file = show_path / ".claude" / "CLAUDE.md"
@@ -1714,7 +1727,7 @@ def sequence_song(mp3_path: str, reference_sequence: str | None = None) -> str:
     return render_sequence_song(mp3_path, reference, notes)
 ```
 
-README: add a "Prompts" section after the tool tables:
+README: add `xlights/profile.py` and `prompts/` to "Project Structure" if that section lists modules, and add a "Prompts" section after the tool tables:
 
 ```markdown
 ### Prompts
@@ -1760,11 +1773,11 @@ Expected: every test passes, 1 deselected.
 
 - [ ] **Step 3: Manual checks.** These are read-only against `E:\XLights`, and anything written goes into a scratch copy in the session scratchpad `C:\Users\slick\AppData\Local\Temp\claude\E--\8c935770-b48a-44ae-b6a1-39ac9cf09310\scratchpad`.
 
-1. **Profile the two reference sequences.** Profile `E:\XLights\HalloweenShow\Corpse Bride - Remains of the Day.xsq` against `load_show_config(Path(r"E:\XLights\HalloweenShow"))`, and `E:\XLights\ChristmasShow\Into the Unknown.xsq` against the Christmas show. Compare with the spec's *Problem* table:
+1. **Profile the two reference sequences.** Profile `E:\XLights\HalloweenShow\Corpse Bride - Remains of the Day.xsq` against `load_show_config(Path(r"E:\XLights\HalloweenShow"))`, and `E:\XLights\ChristmasShow\Panic At The Disco - Into the Unknown (From Frozen 2 ).xsq` against the Christmas show. Compare with the spec's *Problem* table:
    - Remains: 19 groups / 15 models, 0 overlaps, median 5 / p90 13 lit, 2% dark, House ≈51%, All ≈39%.
    - Unknown: 14 / 6, 0, 2 / 6, 4%, All ≈50%, House ≈21%.
 
-   Report the numbers side by side. Small differences are expected where the old measurement counted only child *groups*. Explain any larger gap rather than tuning the code to match.
+   Report the numbers side by side. Expected differences: `All` comes out lower (≈0.17 and ≈0.30). The spec's table counted props reached through any member, but `contained_elements` follows group nesting, and groups like Pipes and Lanterns aren't nested under All even though All holds their props. This is consistent with the writer's parent/child warning, so don't tune the code to match. Explain any other gap.
 2. **Baseline on the real show.** Copy the Halloween show's `xlights_rgbeffects.xml` into a scratch folder. Run `generate_sequence(mp3_path=Path(r"E:\XLights\HalloweenShow\Music\GhostsnStuffft.RobSwire.mp3"), show_path=<scratch>, mode="auto", audio_config=load_config().audio, palette_hint="orange and purple")`. The analysis is cached. Expect:
    - `success`, zero writer errors, and `layers_used` ≤ 2;
    - elements only from the wash/feature tiers and the accent props;
