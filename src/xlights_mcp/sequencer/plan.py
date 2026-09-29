@@ -14,8 +14,9 @@ from typing import TypeVar
 from xlights_mcp.sequencer.timing import last_frame_ms, to_frame
 from xlights_mcp.xlights.layout import contained_elements
 from xlights_mcp.xlights.models import ShowConfig
-from xlights_mcp.xlights.palettes import ColorPalette
+from xlights_mcp.xlights.palettes import MAX_BRIGHTNESS, ColorPalette
 from xlights_mcp.xlights.show import is_submodel_ref
+from xlights_mcp.xlights.value_curves import custom_curve_points
 from xlights_mcp.xlights.xsq_writer import EffectPlacement
 
 MAX_LAYER = 2
@@ -25,6 +26,7 @@ BLEND_MODES: tuple[str, ...] = (
     "Layered", "Average", "Bottom-Top", "Left-Right", "Additive", "Subtractive", "Brightness", "Max", "Min",
 )
 LAYER_METHOD_KEY = "T_CHOICE_LayerMethod"
+BRIGHTNESS_CURVE_KEY = "C_VALUECURVE_Brightness"
 _BLEND_BY_LOWER = {mode.lower(): mode for mode in BLEND_MODES}
 _PLACEMENT_KEYS = ("element", "layer", "effect", "start_ms", "end_ms", "settings", "palette", "blend")
 _PALETTE_KEYS = ("colors", "brightness", "sparkles", "music_sparkles")
@@ -59,19 +61,17 @@ def validate_plan(
     song_end = last_frame_ms(duration_ms)
     indexed: list[tuple[int, EffectPlacement]] = []
     for i, raw in enumerate(plan):
+        where = f"placement {i}{_describe(raw)}"
+        warnings: list[str] = []
         try:
-            placement, rounded, clipped = _placement(raw, models, elements, effect_names, song_end)
+            placement, rounded, clipped = _placement(raw, models, elements, effect_names, song_end, warnings)
         except PlanError as e:
-            result.errors.append(f"placement {i}{_describe(raw)}: {e}")
+            result.errors.append(f"{where}: {e}")
             continue
         result.adjusted["rounded_to_frame"] += rounded
         result.adjusted["clipped_to_end"] += clipped
         indexed.append((i, placement))
-        palette = placement.palette
-        if palette and palette.music_sparkles and palette.sparkle_frequency == 0:
-            result.warnings.append(
-                f"placement {i}{_describe(raw)}: music_sparkles has no effect while sparkles is 0"
-            )
+        result.warnings.extend(f"{where}: {w}" for w in warnings)
     result.errors.extend(_overlaps(indexed))
     result.placements = [p for _, p in indexed]
     result.warnings.extend(_parent_child_warnings(result.placements, show))
@@ -91,6 +91,7 @@ def _placement(
     elements: set[str],
     effect_names: AbstractSet[str],
     song_end: int,
+    warnings: list[str],
 ) -> tuple[EffectPlacement, bool, bool]:
     if not isinstance(raw, dict):
         raise PlanError("must be an object")
@@ -100,17 +101,20 @@ def _placement(
     if not _is_int(layer) or not 0 <= layer <= MAX_LAYER:
         raise PlanError(f"layer must be an integer 0-{MAX_LAYER}, got {layer!r}")
     effect = _effect(raw.get("effect"), effect_names)
-    start, end, rounded, clipped = _times(raw.get("start_ms"), raw.get("end_ms"), song_end)
+    start, full_end, rounded = _times(raw.get("start_ms"), raw.get("end_ms"), song_end)
+    end = min(full_end, song_end)
+    settings = _with_blend(_settings(raw.get("settings")), raw.get("blend"))
+    palette = _palette(raw.get("palette"), start, end, full_end, warnings)
     placement = EffectPlacement(
         model_name=element,
         layer=layer,
         effect_name=effect,
         start_time_ms=start,
         end_time_ms=end,
-        settings=_with_blend(_settings(raw.get("settings")), raw.get("blend")),
-        palette=_palette(raw.get("palette")),
+        settings=settings,
+        palette=palette,
     )
-    return placement, rounded, clipped
+    return placement, rounded, full_end > song_end
 
 
 def _check_keys(mapping: dict, allowed: tuple[str, ...]) -> None:
@@ -150,9 +154,9 @@ def _effect(name, effect_names: AbstractSet[str]) -> str:
     raise PlanError(f"unknown effect {name!r}{_suggest(name, effect_names)}")
 
 
-def _times(start, end, song_end: int) -> tuple[int, int, bool, bool]:
+def _times(start, end, song_end: int) -> tuple[int, int, bool]:
     for key, value in (("start_ms", start), ("end_ms", end)):
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        if not _is_number(value):
             raise PlanError(f"{key} must be a number of milliseconds, got {value!r}")
     if start < 0:
         raise PlanError(f"start_ms must be >= 0, got {start}")
@@ -160,11 +164,11 @@ def _times(start, end, song_end: int) -> tuple[int, int, bool, bool]:
     if frame_start >= song_end:
         raise PlanError(f"starts at or after the song end (last frame {song_end} ms)")
     rounded = (frame_start, frame_end) != (start, end)
-    clipped = frame_end > song_end
-    frame_end = min(frame_end, song_end)
-    if frame_end <= frame_start:
-        raise PlanError(f"ends at or before its start after rounding/clipping ({frame_start}-{frame_end} ms)")
-    return frame_start, frame_end, rounded, clipped
+    if min(frame_end, song_end) <= frame_start:
+        raise PlanError(
+            f"ends at or before its start after rounding/clipping ({frame_start}-{min(frame_end, song_end)} ms)"
+        )
+    return frame_start, frame_end, rounded
 
 
 def _settings(value) -> dict[str, str]:
@@ -185,6 +189,8 @@ def _settings(value) -> dict[str, str]:
     for key, text in pairs:
         if not key or "," in key or "=" in key or any(c.isspace() for c in key):
             raise PlanError(f"invalid settings key {key!r} (no spaces; separate settings with ',' only)")
+        if key == BRIGHTNESS_CURVE_KEY:
+            raise PlanError("put brightness curves in palette.brightness, not settings")
         if key in settings:
             raise PlanError(f"settings key {key} appears twice")
         settings[key] = text
@@ -226,7 +232,7 @@ def _with_blend(settings: dict[str, str], blend) -> dict[str, str]:
     return rest if canonical == "Normal" else {**rest, LAYER_METHOD_KEY: canonical}
 
 
-def _palette(value) -> ColorPalette | None:
+def _palette(value, start: int, end: int, full_end: int, warnings: list[str]) -> ColorPalette | None:
     if value is None:
         return None
     if not isinstance(value, dict):
@@ -238,13 +244,48 @@ def _palette(value) -> ColorPalette | None:
     bad = next((c for c in colors if not (isinstance(c, str) and _HEX_COLOUR.fullmatch(c))), None)
     if bad is not None:
         raise PlanError(f"palette colours must be #RRGGBB, got {bad!r}")
+    brightness = value.get("brightness", 100)
+    curve = None
+    if isinstance(brightness, list):
+        curve, curve_warnings = custom_curve_points(
+            _curve_points(brightness, start, full_end), start, full_end, clip_end_ms=end
+        )
+        warnings.extend(curve_warnings)
+    brightness = 100 if curve else _palette_int(value, "brightness", 100, MAX_BRIGHTNESS)
+    sparkles = _palette_int(value, "sparkles", 0, 200)
+    music_sparkles = _music_sparkles(value.get("music_sparkles", False))
+    if music_sparkles and sparkles == 0:
+        warnings.append("music_sparkles has no effect while sparkles is 0")
     return ColorPalette(
         colors=[c.upper() for c in colors],
         active_colors=list(range(1, len(colors) + 1)),
-        brightness=_palette_int(value, "brightness", 100, 400),
-        sparkle_frequency=_palette_int(value, "sparkles", 0, 200),
-        music_sparkles=_music_sparkles(value.get("music_sparkles", False)),
+        brightness=brightness,
+        brightness_curve=curve,
+        sparkle_frequency=sparkles,
+        music_sparkles=music_sparkles,
     )
+
+
+def _is_number(value) -> bool:
+    return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
+
+
+def _curve_points(points: list, start: int, end: int) -> list[tuple[int, float]]:
+    if not all(isinstance(p, (list, tuple)) and len(p) == 2 and all(_is_number(n) for n in p) for p in points):
+        raise PlanError("palette.brightness points must be [t_ms, value] pairs")
+    if len(points) < 2:
+        raise PlanError("palette.brightness needs at least 2 points")
+    framed = []
+    for t, level in points:
+        frame = to_frame(t)
+        if not start <= frame <= end:
+            raise PlanError(f"palette.brightness point {t} is outside the placement ({start}-{end} ms)")
+        if framed and frame < framed[-1][0]:
+            raise PlanError("palette.brightness point times must not decrease")
+        if not 0 <= level <= MAX_BRIGHTNESS:
+            raise PlanError(f"palette.brightness values must be 0-{MAX_BRIGHTNESS}, got {level}")
+        framed.append((frame, level))
+    return framed
 
 
 def _music_sparkles(value) -> bool:

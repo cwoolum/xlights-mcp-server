@@ -144,9 +144,27 @@ def test_blend_modes_are_explained():
 
 def test_value_curves_are_explained_in_real_units():
     assert "E_VALUECURVE_<setting>" in DEFAULT_TEXT and "RV=TRUE" in DEFAULT_TEXT
-    assert "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|Type=Ramp" in DEFAULT_TEXT
     assert "not percentages" in DEFAULT_TEXT
-    assert "check the ramp in xLights the first time" in DEFAULT_TEXT
+
+
+def test_brightness_curves_are_palette_points_not_a_setting():
+    assert '`"brightness": [[64000, 100], [72000, 300]]`' in DEFAULT_TEXT
+    assert "a step is two points at the same time" in DEFAULT_TEXT
+    assert "200 slots" in DEFAULT_TEXT
+    assert "C_VALUECURVE_Brightness" not in DEFAULT_TEXT
+    assert "in-settings" not in DEFAULT_TEXT
+
+
+def test_restarts_are_explained():
+    assert "**Restarts.** Every new placement restarts the effect's pattern." in DEFAULT_TEXT
+    assert "on the beat, ideally on a downbeat or phrase start" in DEFAULT_TEXT
+    assert "`T_TEXTCTRL_Fadein` and `T_TEXTCTRL_Fadeout`" in DEFAULT_TEXT
+    assert "Never split an effect just to change its brightness" in DEFAULT_TEXT
+    assert "on the layer above with a fade-in, overlapping the previous one by the fade" in DEFAULT_TEXT
+
+
+def test_the_palette_line_mentions_brightness_points():
+    assert "`[t_ms, value]` points for a brightness curve" in DEFAULT_TEXT
 
 
 def test_value_curve_strings_are_only_copied_from_current_version_sequences():

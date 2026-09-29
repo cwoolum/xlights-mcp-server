@@ -133,3 +133,20 @@ def test_the_written_head_carries_the_given_xlights_version(show_copy):
     _write(show_copy, xlights_version="2026.17")
 
     assert ET.parse(show_copy / "Song.xsq").getroot().findtext("head/version") == "2026.17"
+
+
+def test_a_brightness_curve_is_written_into_the_palette(show_copy):
+    plan = [{
+        "element": "House", "layer": 0, "effect": "Color Wash", "start_ms": 0, "end_ms": 4000,
+        "palette": {"colors": ["#FFFFFF"], "brightness": [[0, 100], [4000, 300]]},
+    }]
+
+    report = _write(show_copy, plan=plan)
+
+    assert report["errors"] == [] and report["written"] is True
+    palettes = [p.text or "" for p in ET.parse(show_copy / "Song.xsq").getroot().findall("ColorPalettes/ColorPalette")]
+    assert any(
+        "C_VALUECURVE_Brightness=" in text and "Type=Custom" in text and "Values=0.000:0.2500;1.000:0.7500|" in text
+        and "C_SLIDER_Brightness" not in text
+        for text in palettes
+    )

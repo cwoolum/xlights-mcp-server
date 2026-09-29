@@ -6,6 +6,10 @@ import re
 
 from pydantic import BaseModel, Field
 
+from xlights_mcp.xlights.value_curves import custom_curve_string
+
+MAX_BRIGHTNESS = 400
+
 
 class ColorPalette(BaseModel):
     """An xLights color palette for effects."""
@@ -16,6 +20,7 @@ class ColorPalette(BaseModel):
     sparkle_color: str = ""
     music_sparkles: bool = False
     brightness: int = 100
+    brightness_curve: list[tuple[float, float]] | None = None  # (x 0-1 across the effect, level 0-400)
 
     def to_xlights_string(self) -> str:
         """Serialize to the xLights palette format string."""
@@ -31,7 +36,10 @@ class ColorPalette(BaseModel):
         for idx in self.active_colors:
             parts.append(f"C_CHECKBOX_Palette{idx}=1")
 
-        if self.brightness != 100:
+        if self.brightness_curve:
+            curve = custom_curve_string("Brightness", 0, MAX_BRIGHTNESS, self.brightness_curve)
+            parts.append(f"C_VALUECURVE_Brightness={curve}")
+        elif self.brightness != 100:
             parts.append(f"C_SLIDER_Brightness={self.brightness}")
 
         # Sparkle

@@ -737,7 +737,9 @@ async def write_sequence(
       T_CHOICE_LayerMethod, so don't give both.
     - settings: {key: value} (values must be strings, numbers or booleans, and can't contain
       commas) or a raw "K=V,K=V" string.
-    - palette: {"colors": ["#RRGGBB", ...] (1-8), "brightness": 0-400 (default 100),
+    - palette: {"colors": ["#RRGGBB", ...] (1-8), "brightness": 0-400 (default 100) or
+      [[t_ms, value], ...] points for a brightness curve (2 or more, times inside the
+      placement, linear between points, a step is two points at the same time),
       "sparkles": 0-200 (default 0), "music_sparkles": true|false (default false, needs
       sparkles above 0)}; omitted means a white palette.
 

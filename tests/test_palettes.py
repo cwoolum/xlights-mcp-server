@@ -31,3 +31,21 @@ def test_music_sparkles_is_written_when_set_and_omitted_by_default():
     parts = palette.model_copy(update={"music_sparkles": True}).to_xlights_string().split(",")
     assert parts[-1] == "C_CHECKBOX_MusicSparkles=1"
     assert parts.index("C_CHECKBOX_MusicSparkles=1") == parts.index("C_SLIDER_SparkleFrequency=20") + 1
+
+
+def _curve_palette(points, **fields) -> ColorPalette:
+    return ColorPalette(colors=["#FF0000"], active_colors=[1], brightness_curve=points, **fields)
+
+
+def test_a_curve_is_written_as_a_custom_brightness_value_curve_instead_of_the_slider():
+    text = _curve_palette([(0.0, 100), (1.0, 300)], brightness=40).to_xlights_string()
+
+    assert "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|Type=Custom|" in text
+    assert "|Min=0.00|Max=400.00|RV=TRUE|Values=0.000:0.2500;1.000:0.7500|" in text
+    assert "C_SLIDER_Brightness" not in text
+
+
+def test_slot_one_is_written_with_its_half_slot_position():
+    text = _curve_palette([(0.0, 100), (0.005, 200), (1.0, 200)]).to_xlights_string()
+
+    assert "Values=0.000:0.2500;0.005:0.5000;1.000:0.5000|" in text
