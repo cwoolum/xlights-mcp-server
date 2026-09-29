@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from show_fixtures import make_analysis
+
 from xlights_mcp.audio.analyzer import SongAnalysis
-from xlights_mcp.audio.beats import BeatMap
 from xlights_mcp.audio.stems_model import StemAnalysis, StemOnsets
 from xlights_mcp.sequencer.timing import beat_labels, build_timing_tracks, to_frame
 
@@ -33,15 +34,11 @@ def test_downbeats_match_beats_within_a_small_tolerance():
 
 
 def _analysis(stems: bool = False) -> SongAnalysis:
-    return SongAnalysis(
-        file_path="song.mp3",
-        file_name="song.mp3",
-        duration_seconds=4.0,
-        beats=BeatMap(
-            tempo=120.0,
-            beat_times=[0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5],
-            downbeat_times=[0.0, 2.0],
-        ),
+    return make_analysis(
+        4.0,
+        [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5],
+        [0.0, 2.0],
+        path="song.mp3",
         stem_analysis=StemAnalysis(
             available=stems,
             stems={"drums": StemOnsets(name="drums", onset_times=[0.51, 1.0, 1.005])} if stems else {},

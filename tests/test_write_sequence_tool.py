@@ -3,51 +3,33 @@
 from __future__ import annotations
 
 import json
-import shutil
+from functools import partial
 from pathlib import Path
 
 import pytest
-from mcp.shared.memory import create_connected_server_and_client_session
+from show_fixtures import call_tool, make_analysis
 
 from xlights_mcp import server as server_module
-from xlights_mcp.audio.analyzer import SongAnalysis
-from xlights_mcp.audio.beats import BeatMap
 from xlights_mcp.audio.cache import save_cached
 from xlights_mcp.config import AudioConfig, ServerConfig
 
-FIXTURE = Path(__file__).parent / "fixtures" / "show_groups"
 PLAN = [{"element": "Door", "layer": 0, "effect": "On", "start_ms": 0, "end_ms": 1000}]
 
 
 @pytest.fixture
-def show(tmp_path: Path, click_track: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    folder = tmp_path / "show"
-    folder.mkdir()
-    shutil.copy(FIXTURE / "xlights_rgbeffects.xml", folder)
+def show(show_copy: Path, tmp_path: Path, click_track: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     config = ServerConfig(
-        show_folders={"fixture": str(folder)},
+        show_folders={"fixture": str(show_copy)},
         active_show="fixture",
         audio=AudioConfig(cache_dir=tmp_path / "cache"),
     )
     monkeypatch.setattr(server_module, "_config", config)
-    save_cached(
-        SongAnalysis(
-            file_path=str(click_track),
-            file_name=click_track.name,
-            duration_seconds=3.0,
-            beats=BeatMap(tempo=120.0, beat_times=[0.0, 0.5, 1.0, 1.5], downbeat_times=[0.0]),
-        ),
-        click_track,
-        config.audio.cache_dir,
-    )
-    return folder
+    analysis = make_analysis(3.0, [0.0, 0.5, 1.0, 1.5], [0.0], path=click_track)
+    save_cached(analysis, click_track, config.audio.cache_dir)
+    return show_copy
 
 
-async def _call(args: dict) -> dict:
-    async with create_connected_server_and_client_session(server_module.mcp) as client:
-        result = await client.call_tool("write_sequence", args)
-    assert not result.isError, result.content[0].text
-    return json.loads(result.content[0].text)
+_call = partial(call_tool, "write_sequence")
 
 
 async def test_writes_a_plan_into_the_active_show(show, click_track):

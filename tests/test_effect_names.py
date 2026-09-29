@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from show_fixtures import write_xsq_stub
 
 from xlights_mcp.xlights.effects import (
     MODEL_EFFECT_MAP,
@@ -31,12 +31,8 @@ def test_chase_is_advertised_as_singlestrand():
     assert names.count("SingleStrand") == 1
 
 
-def _xsq(path: Path, body: str) -> None:
-    path.write_text(f"<xsequence><ElementEffects>{body}</ElementEffects></xsequence>", encoding="utf-8")
-
-
 def test_show_sequences_add_their_effect_names(tmp_path):
-    _xsq(
+    write_xsq_stub(
         tmp_path / "a.xsq",
         '<Element type="model" name="X"><EffectLayer>'
         '<Effect ref="0" name="Custom Thing" startTime="0" endTime="25" palette="0"/>'
@@ -60,7 +56,7 @@ def test_sequences_written_by_this_server_are_skipped(tmp_path):
 
 
 def test_timing_marks_are_not_effect_names(tmp_path):
-    _xsq(
+    write_xsq_stub(
         tmp_path / "a.xsq",
         '<Element type="timing" name="Beats"><EffectLayer>'
         '<Effect label="1" startTime="0" endTime="500"/>'
