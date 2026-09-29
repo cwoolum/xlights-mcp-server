@@ -9,8 +9,8 @@ from xlights_mcp.audio.analyzer import SongAnalysis
 from xlights_mcp.audio.drums import BEATS_PER_BAR
 from xlights_mcp.xlights.xsq_writer import FRAME_MS, TimingTrack, TimingTrackLabel
 
-TIMING_TRACK_NAMES = ("Beats", "Bars", "Drums", "Bass", "Instruments")
 _STEM_TRACKS = {"Drums": "drums", "Bass": "bass", "Instruments": "other"}
+TIMING_TRACK_NAMES = ("Beats", "Bars", *_STEM_TRACKS)
 _DOWNBEAT_TOLERANCE_S = 0.05
 
 
@@ -29,14 +29,16 @@ def _on_downbeat(t: float, downbeats: list[float]) -> bool:
     )
 
 
-def beat_labels(beat_times: Sequence[float], downbeat_times: Sequence[float]) -> list[str]:
-    """Each beat's position in its bar: 1 on a downbeat, counting up; pickup beats count back to 4."""
+def beat_labels(
+    beat_times: Sequence[float], downbeat_times: Sequence[float], beats_per_bar: int = BEATS_PER_BAR
+) -> list[str]:
+    """Each beat's position in its bar: 1 on a downbeat, counting up; pickup beats count back."""
     downbeats = sorted(downbeat_times)
     on_downbeat = [_on_downbeat(t, downbeats) for t in beat_times]
     first = next((i for i, down in enumerate(on_downbeat) if down), None)
     if first is None:
-        return [str(i % BEATS_PER_BAR + 1) for i in range(len(beat_times))]
-    labels = [str((i - first) % BEATS_PER_BAR + 1) for i in range(first)]
+        return [str(i % beats_per_bar + 1) for i in range(len(beat_times))]
+    labels = [str((i - first) % beats_per_bar + 1) for i in range(first)]
     position = 0
     for down in on_downbeat[first:]:
         position = 1 if down else position + 1
@@ -66,7 +68,8 @@ def build_timing_tracks(
     for name in names:
         if name == "Beats":
             beats = analysis.beats.beat_times
-            marks = _marks(beats, beat_labels(beats, analysis.beats.downbeat_times), end_ms)
+            labels = beat_labels(beats, analysis.beats.downbeat_times, analysis.beats.beats_per_bar)
+            marks = _marks(beats, labels, end_ms)
         elif name == "Bars":
             bars = analysis.beats.downbeat_times
             marks = _marks(bars, [str(i + 1) for i in range(len(bars))], end_ms)
