@@ -656,6 +656,7 @@ async def create_sequence(
             shows so you can ask the user which one to use.
     """
     from xlights_mcp.sequencer.engine import generate_sequence
+    from xlights_mcp.xlights.version import installed_xlights_version
 
     path = Path(mp3_path).expanduser()
     if not path.exists():
@@ -680,6 +681,7 @@ async def create_sequence(
             audio_config=config.audio,
             vocal_assignments=vocal_assignments,
             progress=on_progress,
+            xlights_version=installed_xlights_version(show_path),
         )
     )
 
@@ -697,14 +699,21 @@ async def write_sequence(
 ) -> dict:
     """Validate an effect plan against the active show and the song, then write it as an .xsq.
 
-    Each placement: {"element", "layer", "effect", "start_ms", "end_ms", "settings", "palette"}.
+    Each placement: {"element", "layer", "effect", "start_ms", "end_ms", "settings", "palette",
+    "blend"}.
     - element: a model or group name (list_models / get_show_layout); submodels aren't supported.
-    - layer: 0-2 (default 0). effect: an xLights effect name (list_effects, or any effect
-      already used in this show's sequences).
+    - layer: 0-2 (default 0; 0 is drawn on top). effect: an xLights effect name (list_effects, or
+      any effect already used in this show's sequences).
+    - blend: how the placement mixes with the layers below it (default "Normal"). Useful ones:
+      "Additive" (white or same-hue accents), "1 reveals 2" (coloured hits keep their colour),
+      "Max" (texture over texture), "Layered" (fills the dark areas below). Any xLights mix
+      type is accepted in any case; unknown names get suggestions. It is shorthand for
+      T_CHOICE_LayerMethod, so don't give both.
     - settings: {key: value} (values must be strings, numbers or booleans, and can't contain
       commas) or a raw "K=V,K=V" string.
     - palette: {"colors": ["#RRGGBB", ...] (1-8), "brightness": 0-400 (default 100),
-      "sparkles": 0-200 (default 0)}; omitted means a white palette.
+      "sparkles": 0-200 (default 0), "music_sparkles": true|false (default false, needs
+      sparkles above 0)}; omitted means a white palette.
 
     Times are rounded to the 25 ms frame grid and clipped to the song end (counted under
     "adjusted"). Any error writes nothing: overlapping placements on the same element and layer,
@@ -713,7 +722,12 @@ async def write_sequence(
     misspelt "pallete"), malformed settings or palette, an unknown or duplicate timing track (a
     timing track can't share a name with a model or group), an invalid name, or an existing file
     without overwrite. A group lit while a group or model inside it is also lit
-    is a warning. The report lists at most 50 errors.
+    is a warning, and so is a Color Wash, Plasma or On with Normal blending that lies over an
+    effect on a higher layer of the same element for that effect's whole duration (it is
+    completely hidden: put bases on the highest layer or give the upper effect a blend). So is
+    a palette with music_sparkles true and sparkles 0 (music sparkles need sparkles above 0).
+    The report lists at most 50 errors. Only the elements the plan uses are written, and the
+    file carries the installed xLights version.
 
     Args:
         mp3_path: The song; analysed first when it isn't cached (like get_beat_map)
@@ -728,6 +742,7 @@ async def write_sequence(
         validate_only: Run every check and return the report without writing
     """
     from xlights_mcp.sequencer.plan_writer import write_plan
+    from xlights_mcp.xlights.version import installed_xlights_version
 
     config = get_config()
     show_path = _active_show(config)
@@ -758,6 +773,7 @@ async def write_sequence(
             timing_tracks=timing_tracks or [],
             overwrite=overwrite,
             validate_only=validate_only,
+            xlights_version=installed_xlights_version(show_path),
         )
     )
 

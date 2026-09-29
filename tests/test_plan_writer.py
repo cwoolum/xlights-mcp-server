@@ -127,3 +127,9 @@ def test_the_error_list_is_capped(show_copy):
 
     assert len(report["errors"]) == MAX_REPORTED_ERRORS + 1
     assert report["errors"][-1] == "... and 5 more errors"
+
+
+def test_the_written_head_carries_the_given_xlights_version(show_copy):
+    _write(show_copy, xlights_version="2026.17")
+
+    assert ET.parse(show_copy / "Song.xsq").getroot().findtext("head/version") == "2026.17"

@@ -293,7 +293,7 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 | Tool | Description |
 |------|-------------|
 | `create_sequence` | Generate a baseline `.xsq` from an `.mp3`: wash in quiet sections, feature groups taking turns, accents on downbeats (use the `sequence_song` prompt for hand-made-style sequences) |
-| `write_sequence` | Validate an effect plan (element, layer 0–2, effect, times, settings, palette) against the show and song, then write it as an `.xsq`, with optional Beats/Bars/stem timing tracks; `validate_only` returns the report without writing |
+| `write_sequence` | Validate an effect plan (element, layer 0–2 where layer 0 draws on top, effect, times, settings, palette, optional blend mode) against the show and song, then write it as an `.xsq`, with optional Beats/Bars/stem timing tracks; `validate_only` returns the report without writing |
 | `preview_plan` | Preview the generation plan without writing a file |
 
 ### Sequence Import & Remapping
@@ -338,10 +338,10 @@ Feature-group effects follow the group's majority model type (arches get chases,
 ### File Format
 
 Generated `.xsq` files are standard xLights XML containing:
-- `<head>` — song metadata, media file path, duration, timing (25ms frames)
+- `<head>` — song metadata, media file path, duration, timing (25ms frames), and the installed xLights version
 - `<ColorPalettes>` — themed color palettes for effects
 - `<EffectDB>` — deduplicated effect parameter definitions
-- `<DisplayElements>` — all models included in the sequence
+- `<DisplayElements>` — the models and groups the sequence uses, plus its timing tracks
 - `<ElementEffects>` — effect placements per model, per layer, with timing
 
 ---

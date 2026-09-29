@@ -17,7 +17,7 @@ from xlights_mcp.xlights.layout import build_show_layout
 from xlights_mcp.xlights.models import ShowConfig
 from xlights_mcp.xlights.palettes import palette_colors
 from xlights_mcp.xlights.show import load_show_config
-from xlights_mcp.xlights.xsq_writer import TimingTrack, TimingTrackLabel
+from xlights_mcp.xlights.xsq_writer import DEFAULT_XLIGHTS_VERSION, TimingTrack, TimingTrackLabel
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +202,7 @@ def generate_sequence(
     audio_config: AudioConfig | None = None,
     vocal_assignments: dict[str, str] | None = None,
     progress: ProgressCallback | None = None,
+    xlights_version: str = DEFAULT_XLIGHTS_VERSION,
 ) -> dict:
     """Write the baseline sequence for a music file (auto), or return the guided preview.
 
@@ -223,7 +224,7 @@ def generate_sequence(
     if mode == "auto":
         return _generate_auto(
             analysis, show_config, mp3_path, palette_hint, theme,
-            vocal_assignments=vocal_assignments,
+            vocal_assignments=vocal_assignments, xlights_version=xlights_version,
         )
     elif mode == "guided":
         return _generate_guided_preview(analysis, show_config)
@@ -349,9 +350,9 @@ def _face_placements(
             key = "ColorWash_slow"
         else:
             key = FACE_BED_KEYS[index % len(FACE_BED_KEYS)]
-        plan.append(_placement(model, 0, key, *span, palette))
+        plan.append(_placement(model, 1, key, *span, palette))
     plan.append({
-        "element": model, "layer": 1, "effect": "Faces", "start_ms": 0, "end_ms": song_end,
+        "element": model, "layer": 0, "effect": "Faces", "start_ms": 0, "end_ms": song_end,
         "settings": {
             "E_CHECKBOX_Faces_Outline": "1",
             "E_CHOICE_Faces_EyeBlinkDuration": "Normal",
@@ -374,6 +375,7 @@ def _generate_auto(
     palette_hint: str | None,
     theme: str | None,
     vocal_assignments: dict[str, str] | None = None,
+    xlights_version: str = DEFAULT_XLIGHTS_VERSION,
 ) -> dict:
     """Write the baseline sequence: the baseline plan plus singing faces, through write_plan."""
     show_path = Path(show_config.show_path)
@@ -454,6 +456,7 @@ def _generate_auto(
         timing_tracks=named_tracks,
         extra_tracks=lyric_tracks,
         show=show_config,
+        xlights_version=xlights_version,
     )
     if not report["written"]:
         return {
@@ -645,7 +648,7 @@ def _baseline_placements(analysis: SongAnalysis, cast: _Cast, colors: list[str])
                     at = to_frame(downbeat * 1000)
                     if at >= song_end:
                         continue
-                    plan.append(_placement(pool[accent_turn % len(pool)], 1, "On_solid", at, at + ACCENT_MS, palette))
+                    plan.append(_placement(pool[accent_turn % len(pool)], 0, "On_solid", at, at + ACCENT_MS, palette))
                     accent_turn += 1
     return plan
 

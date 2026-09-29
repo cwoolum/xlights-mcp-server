@@ -6,9 +6,10 @@ import difflib
 import math
 import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
+from typing import TypeVar
 
 from xlights_mcp.sequencer.timing import last_frame_ms, to_frame
 from xlights_mcp.xlights.layout import contained_elements
@@ -18,13 +19,22 @@ from xlights_mcp.xlights.show import is_submodel_ref
 from xlights_mcp.xlights.xsq_writer import EffectPlacement
 
 MAX_LAYER = 2
-_PLACEMENT_KEYS = ("element", "layer", "effect", "start_ms", "end_ms", "settings", "palette")
-_PALETTE_KEYS = ("colors", "brightness", "sparkles")
-PARENT_CHILD_PAIRS_LISTED = 10
+BLEND_MODES: tuple[str, ...] = (
+    "Normal", "Effect 1", "Effect 2", "1 is Mask", "2 is Mask", "1 is Unmask", "2 is Unmask",
+    "1 is True Unmask", "2 is True Unmask", "1 reveals 2", "2 reveals 1", "Shadow 1 on 2", "Shadow 2 on 1",
+    "Layered", "Average", "Bottom-Top", "Left-Right", "Additive", "Subtractive", "Brightness", "Max", "Min",
+)
+LAYER_METHOD_KEY = "T_CHOICE_LayerMethod"
+_BLEND_BY_LOWER = {mode.lower(): mode for mode in BLEND_MODES}
+_PLACEMENT_KEYS = ("element", "layer", "effect", "start_ms", "end_ms", "settings", "palette", "blend")
+_PALETTE_KEYS = ("colors", "brightness", "sparkles", "music_sparkles")
+WARNINGS_LISTED = 10
+FULL_COVERAGE_EFFECTS = frozenset({"Color Wash", "Plasma", "On"})
 _EFFECT_HINTS = {
     "chase": ("SingleStrand", " (Chase is a SingleStrand mode: E_NOTEBOOK_SSEFFECT_TYPE=Chase)"),
     "vumeter": ("VU Meter", ""),
 }
+_K = TypeVar("_K")
 _HEX_COLOUR = re.compile(r"#[0-9A-Fa-f]{6}")
 
 
@@ -57,9 +67,15 @@ def validate_plan(
         result.adjusted["rounded_to_frame"] += rounded
         result.adjusted["clipped_to_end"] += clipped
         indexed.append((i, placement))
+        palette = placement.palette
+        if palette and palette.music_sparkles and palette.sparkle_frequency == 0:
+            result.warnings.append(
+                f"placement {i}{_describe(raw)}: music_sparkles has no effect while sparkles is 0"
+            )
     result.errors.extend(_overlaps(indexed))
     result.placements = [p for _, p in indexed]
     result.warnings.extend(_parent_child_warnings(result.placements, show))
+    result.warnings.extend(_layer_cover_warnings(result.placements))
     return result
 
 
@@ -91,7 +107,7 @@ def _placement(
         effect_name=effect,
         start_time_ms=start,
         end_time_ms=end,
-        settings=_settings(raw.get("settings")),
+        settings=_with_blend(_settings(raw.get("settings")), raw.get("blend")),
         palette=_palette(raw.get("palette")),
     )
     return placement, rounded, clipped
@@ -194,6 +210,22 @@ def _settings_text(key, value) -> str:
     return text
 
 
+def _with_blend(settings: dict[str, str], blend) -> dict[str, str]:
+    raw = settings.get(LAYER_METHOD_KEY)
+    if blend is not None and raw is not None:
+        raise PlanError(f"use blend or {LAYER_METHOD_KEY}, not both")
+    chosen = blend if blend is not None else raw
+    if chosen is None:
+        return settings
+    if not isinstance(chosen, str):
+        raise PlanError(f"blend must be one of {', '.join(BLEND_MODES)}, got {chosen!r}")
+    canonical = _BLEND_BY_LOWER.get(chosen.lower())
+    if canonical is None:
+        raise PlanError(f"unknown blend {chosen!r}{_suggest(chosen, BLEND_MODES)}")
+    rest = {key: value for key, value in settings.items() if key != LAYER_METHOD_KEY}
+    return rest if canonical == "Normal" else {**rest, LAYER_METHOD_KEY: canonical}
+
+
 def _palette(value) -> ColorPalette | None:
     if value is None:
         return None
@@ -211,7 +243,14 @@ def _palette(value) -> ColorPalette | None:
         active_colors=list(range(1, len(colors) + 1)),
         brightness=_palette_int(value, "brightness", 100, 400),
         sparkle_frequency=_palette_int(value, "sparkles", 0, 200),
+        music_sparkles=_music_sparkles(value.get("music_sparkles", False)),
     )
+
+
+def _music_sparkles(value) -> bool:
+    if not isinstance(value, bool):
+        raise PlanError(f"palette.music_sparkles must be true or false, got {value!r}")
+    return value
 
 
 def _palette_int(palette: dict, key: str, default: int, upper: int) -> int:
@@ -241,25 +280,66 @@ def _overlaps(indexed: list[tuple[int, EffectPlacement]]) -> list[str]:
     return errors
 
 
-def _parent_child_warnings(placements: list[EffectPlacement], show: ShowConfig) -> list[str]:
-    lit: dict[str, list[tuple[int, int]]] = defaultdict(list)
+def _lit_by_element(placements: list[EffectPlacement]) -> dict[str, list[EffectPlacement]]:
+    lit: dict[str, list[EffectPlacement]] = defaultdict(list)
     for p in placements:
         if p.effect_name != "Off":
-            lit[p.model_name].append((p.start_time_ms, p.end_time_ms))
+            lit[p.model_name].append(p)
+    return lit
+
+
+def _parent_child_warnings(placements: list[EffectPlacement], show: ShowConfig) -> list[str]:
+    lit = _lit_by_element(placements)
     counts: dict[tuple[str, str], int] = {}
     for parent, members in contained_elements(show).items():
         if parent not in lit:
             continue
         for child in members & lit.keys():
-            n = sum(1 for s1, e1 in lit[parent] for s2, e2 in lit[child] if s1 < e2 and s2 < e1)
+            n = sum(
+                1 for a in lit[parent] for b in lit[child]
+                if a.start_time_ms < b.end_time_ms and b.start_time_ms < a.end_time_ms
+            )
             if n:
                 counts[(parent, child)] = n
+    return _listed(
+        counts,
+        lambda pair, n: f"{_plural(n, 'moment')} where {pair[0]} and {pair[1]} are both lit",
+        lambda extra: f"... and {_plural(extra, 'more parent/child pair')} lit together",
+    )
+
+
+def _layer_cover_warnings(placements: list[EffectPlacement]) -> list[str]:
+    covers: dict[tuple[str, int, int], list[str]] = defaultdict(list)
+    for element, items in _lit_by_element(placements).items():
+        bases = [p for p in items if p.effect_name in FULL_COVERAGE_EFFECTS and LAYER_METHOD_KEY not in p.settings]
+        for base in bases:
+            for below in items:
+                if (
+                    below.layer > base.layer
+                    and base.start_time_ms <= below.start_time_ms
+                    and below.end_time_ms <= base.end_time_ms
+                ):
+                    covers[(element, base.layer, below.layer)].append(base.effect_name)
+    return _listed(
+        {key: len(effects) for key, effects in covers.items()},
+        lambda key, n: (
+            f"{_plural(n, 'effect')} on {key[0]} layer {key[2]} completely hidden by "
+            f"{covers[key][0]} on layer {key[1]} "
+            "(layer 0 is drawn on top: put bases on the highest layer, or give the upper effect a blend)"
+        ),
+        lambda extra: f"... and {_plural(extra, 'more hidden layer pair')}",
+    )
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'s' if n != 1 else ''}"
+
+
+def _listed(
+    counts: dict[_K, int], line: Callable[[_K, int], str], overflow: Callable[[int], str]
+) -> list[str]:
     ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
-    warnings = [
-        f"{n} moment{'s' if n != 1 else ''} where {parent} and {child} are both lit"
-        for (parent, child), n in ranked[:PARENT_CHILD_PAIRS_LISTED]
-    ]
-    extra = len(ranked) - PARENT_CHILD_PAIRS_LISTED
-    if extra > 0:
-        warnings.append(f"... and {extra} more parent/child pair{'s' if extra != 1 else ''} lit together")
-    return warnings
+    lines = [line(key, n) for key, n in ranked[:WARNINGS_LISTED]]
+    if len(ranked) > WARNINGS_LISTED:
+        lines.append(overflow(len(ranked) - WARNINGS_LISTED))
+    return lines

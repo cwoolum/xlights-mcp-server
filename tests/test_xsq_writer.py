@@ -5,9 +5,10 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from xlights_mcp.xlights.models import ShowConfig
+from xlights_mcp.xlights.models import LightModel, ModelGroup, ShowConfig
 from xlights_mcp.xlights.palettes import DEFAULT_PALETTE, ColorPalette
 from xlights_mcp.xlights.xsq_writer import (
+    DEFAULT_XLIGHTS_VERSION,
     EffectPlacement,
     SequenceSpec,
     TimingTrack,
@@ -85,3 +86,42 @@ def test_timing_tracks_come_before_models_in_both_element_lists(tmp_path):
     assert display[0].get("views") == ""
     effects = root.findall("ElementEffects/Element")
     assert [(e.get("type"), e.get("name")) for e in effects] == [("timing", "Beats"), ("model", "Roof")]
+
+
+def test_only_elements_with_placements_are_listed(tmp_path):
+    show = ShowConfig(show_path=".", show_name="test", models=[LightModel(name=f"M{n}") for n in range(30)])
+    out = tmp_path / "s.xsq"
+
+    write_xsq(SequenceSpec(duration_ms=10000, effects=[_on("M7")]), show, out)
+
+    root = ET.parse(out).getroot()
+    assert [e.get("name") for e in root.findall("DisplayElements/Element")] == ["M7"]
+    assert [e.get("name") for e in root.findall("ElementEffects/Element")] == ["M7"]
+
+
+def test_model_elements_follow_the_show_groups_first_then_models_then_strangers(tmp_path):
+    show = ShowConfig(
+        show_path=".",
+        show_name="test",
+        models=[LightModel(name="Zebra"), LightModel(name="Apple")],
+        model_groups=[ModelGroup(name="Yard"), ModelGroup(name="All")],
+    )
+    out = tmp_path / "s.xsq"
+    placements = [_on(name) for name in ("Apple", "Stray B", "Zebra", "All", "Stray A", "Yard")]
+
+    write_xsq(SequenceSpec(duration_ms=10000, effects=placements), show, out)
+
+    root = ET.parse(out).getroot()
+    expected = ["Yard", "All", "Zebra", "Apple", "Stray A", "Stray B"]
+    assert [e.get("name") for e in root.findall("DisplayElements/Element")] == expected
+    assert [e.get("name") for e in root.findall("ElementEffects/Element")] == expected
+
+
+def test_the_head_carries_the_spec_version(tmp_path):
+    root = _write(tmp_path, _on("Roof"), xlights_version="2026.17")
+
+    assert root.findtext("head/version") == "2026.17"
+
+
+def test_the_head_version_defaults_to_the_generator_default(tmp_path):
+    assert _write(tmp_path, _on("Roof")).findtext("head/version") == DEFAULT_XLIGHTS_VERSION

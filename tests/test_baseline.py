@@ -48,11 +48,12 @@ def _plan(exclude=frozenset()):
     return build_baseline_plan(ANALYSIS, SHOW, COLORS, exclude)
 
 
-def _within(plan, start_s, end_s, layer=None):
-    return [
-        p for p in plan
-        if start_s * 1000 <= p["start_ms"] < end_s * 1000 and (layer is None or p["layer"] == layer)
-    ]
+def _within(plan, start_s, end_s):
+    return [p for p in plan if start_s * 1000 <= p["start_ms"] < end_s * 1000]
+
+
+def _accents(plan):
+    return [p for p in plan if p["element"] in ACCENT_PROPS]
 
 
 def test_the_plan_passes_the_writer_checks():
@@ -62,11 +63,11 @@ def test_the_plan_passes_the_writer_checks():
     assert result.warnings == []
 
 
-def test_elements_are_wash_or_feature_groups_or_accent_props_on_layers_0_and_1():
+def test_elements_are_wash_or_feature_groups_or_accent_props_all_on_layer_0():
     plan = _plan()
 
     assert {p["element"] for p in plan} <= FEATURES | ACCENT_PROPS | {"Everything Flat"}
-    assert {p["layer"] for p in plan} == {0, 1}
+    assert {p["layer"] for p in plan} == {0}
 
 
 def test_quiet_sections_get_only_the_largest_wash_group_dimmed():
@@ -82,18 +83,18 @@ def test_quiet_sections_get_only_the_largest_wash_group_dimmed():
 def test_feature_halves_take_turns_by_height():
     plan = _plan()
 
-    lit = [{p["element"] for p in _within(plan, s, e, layer=0)} for s, e in [(8, 20), (20, 32), (40, 52)]]
+    lit = [{p["element"] for p in _within(plan, s, e)} - ACCENT_PROPS for s, e in [(8, 20), (20, 32), (40, 52)]]
     assert lit == [{"Pipes", "Legacy Arches", "Door"}, {"Lanterns", "Roof Edges"}, {"Pipes", "Legacy Arches", "Door"}]
 
 
 def test_accents_hit_each_downbeat_of_accent_sections_on_props_not_already_lit():
     plan = _plan()
 
-    chorus = _within(plan, 20, 32, layer=1)
+    chorus = _accents(_within(plan, 20, 32))
     assert [p["start_ms"] for p in chorus] == [20000, 22000, 24000, 26000, 28000, 30000]
     assert all(p["effect"] == "On" and p["end_ms"] - p["start_ms"] == ACCENT_MS for p in chorus)
     assert [p["element"] for p in chorus] == ["Door L", "Door R", "Arch 1", "Arch 2", "Door L", "Door R"]
-    assert _within(plan, 8, 20, layer=1) == []
+    assert _accents(_within(plan, 8, 20)) == []
 
 
 def test_every_placement_uses_the_given_colours():
@@ -125,7 +126,7 @@ def test_accent_exclusions_skip_those_props_but_keep_their_groups():
 
     assert "Lantern2" not in {p["element"] for p in plan}
     assert "Lanterns" in {p["element"] for p in plan}
-    assert len([p for p in plan if p["layer"] == 1]) == len(range(20, 32, 2)) + len(range(40, 52, 2))
+    assert len(_accents(plan)) == len(range(20, 32, 2)) + len(range(40, 52, 2))
 
 
 def test_without_a_wash_group_quiet_sections_stay_dark():
@@ -163,7 +164,7 @@ def test_a_downbeat_in_the_last_frame_gets_no_accent():
 
     plan = build_baseline_plan(analysis, SHOW, COLORS)
 
-    assert [p["start_ms"] for p in plan if p["layer"] == 1] == [0, 2000, 4000, 6000, 8000]
+    assert [p["start_ms"] for p in _accents(plan)] == [0, 2000, 4000, 6000, 8000]
     assert validate_plan(plan, SHOW, analysis.duration_ms, XLIGHTS_EFFECT_NAMES).errors == []
 
 
@@ -180,7 +181,8 @@ def test_a_section_starting_in_the_last_frame_is_skipped():
 def test_face_backgrounds_skip_a_section_starting_in_the_last_frame():
     plan = _face_placements(LAST_FRAME_SECTION, "Lantern2", "Singing Face", "Vocals", COLORS)
 
-    assert [(p["effect"], p["start_ms"], p["end_ms"]) for p in plan if p["layer"] == 0] == [("Twinkle", 0, 10000)]
+    assert [(p["effect"], p["start_ms"], p["end_ms"]) for p in plan if p["layer"] == 1] == [("Twinkle", 0, 10000)]
+    assert [p["effect"] for p in plan if p["layer"] == 0] == ["Faces"]
     assert validate_plan(plan, SHOW, LAST_FRAME_SECTION.duration_ms, XLIGHTS_EFFECT_NAMES).errors == []
 
 
