@@ -102,22 +102,28 @@ def test_a_show_with_only_placeholders_is_an_error(tmp_path, click_track, audio)
     assert "error" in _generate(click_track, show, audio)
 
 
+def _add_faces(show: Path, *lanterns: tuple[str, str]) -> None:
+    xml = show / "xlights_rgbeffects.xml"
+    text = xml.read_text(encoding="utf-8")
+    for name, y in lanterns:
+        text = text.replace(
+            f'<model name="{name}" DisplayAs="Custom" WorldPosY="{y}"/>',
+            f'<model name="{name}" DisplayAs="Custom" WorldPosY="{y}"><faceInfo Name="Singing Face"/></model>',
+        )
+    xml.write_text(text, encoding="utf-8")
+
+
 @pytest.fixture
 def singing_show(show_copy: Path) -> Path:
-    xml = show_copy / "xlights_rgbeffects.xml"
-    text = xml.read_text(encoding="utf-8").replace(
-        '<model name="Lantern2" DisplayAs="Custom" WorldPosY="100.0"/>',
-        '<model name="Lantern2" DisplayAs="Custom" WorldPosY="100.0"><faceInfo Name="Singing Face"/></model>',
-    )
-    xml.write_text(text, encoding="utf-8")
+    _add_faces(show_copy, ("Lantern2", "100.0"))
     return show_copy
 
 
-def _lyrics() -> LyricTrack:
+def _lyrics(name: str = "Vocals") -> LyricTrack:
     return LyricTrack(
         words=[LyricWord(word="boo", start_time=1.0, end_time=1.5)],
         phonemes=[PhonemeEvent(phoneme="U", start_time_ms=1000, end_time_ms=1500)],
-        track_name="Vocals",
+        track_name=name,
         available=True,
     )
 
@@ -195,3 +201,35 @@ def test_a_lyric_track_named_like_a_show_element_is_renamed(
     assert result["vocal_assignments"] == {"Lantern2": renamed}
     assert _faces_timing_tracks(result["output_path"], "Lantern2") == [renamed]
     assert any(f"renamed to {renamed!r}" in w for w in result["warnings"])
+
+
+def test_an_unknown_assigned_track_falls_back_to_the_first_with_a_warning(click_track, singing_show, audio, monkeypatch):
+    monkeypatch.setattr(engine, "_try_extract_vocal_tracks", lambda _path: [_lyrics()])
+
+    result = _generate(click_track, singing_show, audio, vocal_assignments={"all": "Nope"})
+
+    assert result["vocal_assignments"] == {"Lantern2": "Vocals"}
+    assert result["warnings"].count("vocal_assignments names unknown track 'Nope'; using 'Vocals'") == 1
+
+
+def test_an_assignment_for_a_model_that_does_not_sing_is_reported(click_track, singing_show, audio, monkeypatch):
+    monkeypatch.setattr(engine, "_try_extract_vocal_tracks", lambda _path: [_lyrics()])
+
+    result = _generate(click_track, singing_show, audio, vocal_assignments={"Lantern9": "Vocals"})
+
+    assert result["vocal_assignments"] == {"Lantern2": "Vocals"}
+    assert "vocal_assignments key 'Lantern9' isn't a singing model" in result["warnings"]
+
+
+def test_each_singing_model_gets_its_assigned_track(click_track, show_copy, audio, monkeypatch):
+    _add_faces(show_copy, ("Lantern1", "90.0"), ("Lantern2", "100.0"))
+    monkeypatch.setattr(engine, "_try_extract_vocal_tracks", lambda _path: [_lyrics(), _lyrics("Backing")])
+
+    result = _generate(
+        click_track, show_copy, audio, vocal_assignments={"Lantern1": "Backing", "Lantern2": "Vocals"}
+    )
+
+    assert result["vocal_assignments"] == {"Lantern1": "Backing", "Lantern2": "Vocals"}
+    assert _faces_timing_tracks(result["output_path"], "Lantern1") == ["Backing"]
+    assert _faces_timing_tracks(result["output_path"], "Lantern2") == ["Vocals"]
+    assert not any("vocal_assignments" in w for w in result["warnings"])

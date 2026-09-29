@@ -401,9 +401,17 @@ def _generate_auto(
             }
         else:
             vocal_tracks, by_name = _renamed_lyric_tracks(vocal_tracks, elements | set(named_tracks), warnings)
+            warnings.extend(
+                f"vocal_assignments key {key!r} isn't a singing model"
+                for key in vocal_assignments if key != "all" and key not in singing
+            )
             for model, face_definition in singing.items():
                 requested = vocal_assignments.get("all", vocal_assignments.get(model))
                 track = by_name.get(requested, vocal_tracks[0])
+                if requested is not None and requested not in by_name:
+                    unknown = f"vocal_assignments names unknown track {requested!r}; using {track.track_name!r}"
+                    if unknown not in warnings:
+                        warnings.append(unknown)
                 assignments[model] = track.track_name
                 faces.extend(_face_placements(analysis, model, face_definition, track.track_name, colors))
             song_end = last_frame_ms(analysis.duration_ms)
