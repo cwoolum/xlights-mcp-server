@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import tempfile
 import threading
@@ -615,6 +616,87 @@ async def create_sequence(
             progress=on_progress,
         )
     )
+
+@mcp.tool()
+async def write_sequence(
+    mp3_path: str,
+    ctx: Context,
+    plan: list[dict] | None = None,
+    plan_path: str | None = None,
+    name: str | None = None,
+    timing_tracks: list[str] | None = None,
+    overwrite: bool = False,
+    validate_only: bool = False,
+) -> dict:
+    """Validate an effect plan against the active show and the song, then write it as an .xsq.
+
+    Each placement: {"element", "layer", "effect", "start_ms", "end_ms", "settings", "palette"}.
+    - element: a model or group name (list_models / get_show_layout); submodels aren't supported.
+    - layer: 0-2 (default 0). effect: an xLights effect name (list_effects, or any effect
+      already used in this show's sequences).
+    - settings: {key: value} (values must be strings, numbers or booleans, and can't contain
+      commas) or a raw "K=V,K=V" string.
+    - palette: {"colors": ["#RRGGBB", ...] (1-8), "brightness": 0-400 (default 100),
+      "sparkles": 0-200 (default 0)}; omitted means a white palette.
+
+    Times are rounded to the 25 ms frame grid and clipped to the song end (counted under
+    "adjusted"). Any error writes nothing: overlapping placements on the same element and layer,
+    a bad layer, an unknown element or effect, an unknown placement or palette key (e.g. a
+    misspelt "pallete"), malformed settings or palette, an unknown or duplicate timing track, or
+    an existing file without overwrite. A group lit while a group or model inside it is also lit
+    is a warning. The report lists at most 50 errors.
+
+    Args:
+        mp3_path: The song; analysed first when it isn't cached (like get_beat_map)
+        plan: The placements. Pass this or plan_path, not both.
+        plan_path: A JSON file holding the placement list; relative paths resolve against
+            the active show folder
+        name: Sequence file name without .xsq (default: the song's file name)
+        timing_tracks: Any of "Beats" (labelled with the beat's position in its bar), "Bars"
+            (numbered), "Drums", "Bass", "Instruments" (stem onsets; need stem separation).
+            Effects can reference them, e.g. E_CHOICE_VUMeter_TimingTrack=Beats.
+        overwrite: Replace an existing .xsq with the same name
+        validate_only: Run every check and return the report without writing
+    """
+    from xlights_mcp.sequencer.plan_writer import write_plan
+
+    config = get_config()
+    show_path = config.active_show_path
+    if not show_path or not show_path.exists():
+        return {
+            "error": "No active show folder configured.",
+            "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
+        }
+    path = Path(mp3_path).expanduser()
+    if not path.exists():
+        return {"error": f"File not found: {path}"}
+    if (plan is None) == (plan_path is None):
+        return {"error": "Pass exactly one of plan or plan_path."}
+    if plan_path is not None:
+        plan_file = Path(plan_path).expanduser()
+        if not plan_file.is_absolute():
+            plan_file = show_path / plan_file
+        try:
+            plan = json.loads(plan_file.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as e:
+            return {"error": f"Could not read plan file {plan_file}: {e}"}
+        if not isinstance(plan, list):
+            return {"error": f"Plan file {plan_file} must hold a list of placements."}
+
+    analysis = await _analyze_in_thread(path, ctx)
+    return await anyio.to_thread.run_sync(
+        lambda: write_plan(
+            plan,
+            analysis,
+            path,
+            show_path,
+            name=name,
+            timing_tracks=timing_tracks or [],
+            overwrite=overwrite,
+            validate_only=validate_only,
+        )
+    )
+
 
 
 @mcp.tool()

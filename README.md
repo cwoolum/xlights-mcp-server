@@ -292,6 +292,7 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 | Tool | Description |
 |------|-------------|
 | `create_sequence` | Generate a `.xsq` file from an `.mp3` with effects on all models |
+| `write_sequence` | Validate an effect plan (element, layer 0–2, effect, times, settings, palette) against the show and song, then write it as an `.xsq`, with optional Beats/Bars/stem timing tracks; `validate_only` returns the report without writing |
 | `preview_plan` | Preview the generation plan without writing a file |
 
 ### Sequence Import & Remapping
