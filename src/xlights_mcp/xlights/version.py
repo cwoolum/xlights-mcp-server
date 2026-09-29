@@ -31,10 +31,15 @@ def _registry_version() -> str | None:
         entries = _read_uninstall_entries()
     except (OSError, ValueError, ImportError):
         return None
-    for name, display_version in entries:
-        if name.lower().startswith("xlights") and _VERSION.fullmatch(display_version.strip()):
-            return display_version.strip()
-    return None
+    found = [
+        v.strip() for name, v in entries if name.lower().startswith("xlights") and _VERSION.fullmatch(v.strip())
+    ]
+    return max(found, key=_sort_key, default=None)
+
+
+def _sort_key(text: str) -> tuple[int, int]:
+    year, _, minor = text.partition(".")
+    return int(year), int(minor)
 
 
 def _read_uninstall_entries() -> list[tuple[str, str]]:
@@ -67,7 +72,7 @@ def _entry(uninstall, subkey: str) -> list[tuple[str, str]]:
 def _show_folder_version(show_path: Path | None) -> str | None:
     if show_path is None:
         return None
-    best: tuple[int, int] | None = None
+    best: str | None = None
     try:
         sequences = list(Path(show_path).glob("*.xsq"))
     except OSError:
@@ -79,8 +84,6 @@ def _show_folder_version(show_path: Path | None) -> str | None:
         except OSError:
             continue
         match = _HEAD_VERSION.search(head)
-        if match:
-            year, _, minor = match.group(1).partition(".")
-            candidate = (int(year), int(minor))
-            best = max(best, candidate) if best else candidate
-    return f"{best[0]}.{best[1]}" if best else None
+        if match and (best is None or _sort_key(match.group(1)) > _sort_key(best)):
+            best = match.group(1)
+    return best

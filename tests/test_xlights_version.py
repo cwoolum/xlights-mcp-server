@@ -35,6 +35,22 @@ def test_the_registry_version_wins_on_windows(tmp_path, monkeypatch):
     assert installed_xlights_version(tmp_path) == "2026.17"
 
 
+def test_the_newest_matching_registry_entry_wins(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    entries = [("xLights version 2025.9", "2025.9"), ("xLights version 2026.17", "2026.17"), ("xLights", "2026.5")]
+    monkeypatch.setattr(version, "_read_uninstall_entries", lambda: entries)
+
+    assert installed_xlights_version(tmp_path) == "2026.17"
+
+
+def test_the_version_is_returned_as_written(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    _sequence(tmp_path, "a.xsq", "2026.05")
+    _sequence(tmp_path, "b.xsq", "2025.13")
+
+    assert installed_xlights_version(tmp_path) == "2026.05"
+
+
 def test_the_show_folder_supplies_the_highest_version_off_windows(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     _sequence(tmp_path, "a.xsq", "2024.19")
