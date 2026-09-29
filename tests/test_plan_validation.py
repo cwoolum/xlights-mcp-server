@@ -311,3 +311,88 @@ def test_music_sparkles_must_be_a_boolean(value):
     error = _validate(_p(palette={"colors": ["#FFFFFF"], "music_sparkles": value})).errors[0]
 
     assert "music_sparkles" in error
+
+
+def test_a_wash_on_layer_0_over_a_lower_layer_warns_that_it_hides_it():
+    result = _validate(
+        _p(layer=0, effect="Color Wash", start_ms=0, end_ms=4000),
+        _p(layer=1, effect="On", start_ms=1000, end_ms=2000),
+    )
+
+    assert result.errors == []
+    assert result.warnings == [
+        (
+            "1 moment where Color Wash on Door layer 0 hides layer 1 "
+            "(layer 0 is drawn on top: put bases on the highest layer, or give the upper effect a blend)"
+        )
+    ]
+
+
+def test_a_blended_wash_hides_nothing():
+    result = _validate(
+        _p(layer=0, effect="Color Wash", blend="Additive", start_ms=0, end_ms=4000),
+        _p(layer=1, effect="On", start_ms=1000, end_ms=2000),
+    )
+
+    assert result.warnings == []
+
+
+def test_an_explicit_normal_layer_method_still_hides():
+    result = _validate(
+        _p(layer=0, effect="Plasma", settings={"T_CHOICE_LayerMethod": "Normal"}, start_ms=0, end_ms=4000),
+        _p(layer=1, effect="On", start_ms=1000, end_ms=2000),
+    )
+
+    assert len(result.warnings) == 1
+
+
+def test_a_base_on_the_highest_layer_under_an_accent_warns_nothing():
+    result = _validate(
+        _p(layer=1, effect="Color Wash", start_ms=0, end_ms=4000),
+        _p(layer=0, effect="Twinkle", start_ms=1000, end_ms=2000),
+    )
+
+    assert result.warnings == []
+
+
+def test_a_wash_and_a_lower_layer_that_never_overlap_warn_nothing():
+    result = _validate(
+        _p(layer=0, effect="Color Wash", start_ms=0, end_ms=1000),
+        _p(layer=1, effect="On", start_ms=1000, end_ms=2000),
+    )
+
+    assert result.warnings == []
+
+
+def test_elements_do_not_hide_each_other():
+    result = _validate(
+        _p(element="Door", layer=0, effect="Color Wash", start_ms=0, end_ms=4000),
+        _p(element="Tree 6ft", layer=1, effect="On", start_ms=1000, end_ms=2000),
+    )
+
+    assert result.warnings == []
+
+
+def test_hidden_moments_are_counted_per_layer_pair():
+    result = _validate(
+        _p(layer=0, effect="Plasma", start_ms=0, end_ms=4000),
+        _p(layer=1, effect="Twinkle", start_ms=0, end_ms=1000),
+        _p(layer=1, effect="Twinkle", start_ms=2000, end_ms=3000),
+        _p(layer=2, effect="Twinkle", start_ms=0, end_ms=1000),
+    )
+
+    assert [w.split(" (")[0] for w in result.warnings] == [
+        "2 moments where Plasma on Door layer 0 hides layer 1",
+        "1 moment where Plasma on Door layer 0 hides layer 2",
+    ]
+
+
+def test_layer_cover_warnings_list_the_first_ten_groups():
+    placements = [
+        _p(element=f"Pipe {n}", layer=0, effect="Color Wash", start_ms=0, end_ms=1000) for n in range(1, 12)
+    ] + [_p(element=f"Pipe {n}", layer=1, effect="On", start_ms=0, end_ms=1000) for n in range(1, 12)]
+
+    result = _validate(*placements)
+
+    assert len(result.warnings) == 11
+    assert result.warnings[-1] == "... and 1 more hidden layer pair"

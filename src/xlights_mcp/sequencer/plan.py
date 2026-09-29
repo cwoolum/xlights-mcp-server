@@ -27,6 +27,7 @@ LAYER_METHOD_KEY = "T_CHOICE_LayerMethod"
 _PLACEMENT_KEYS = ("element", "layer", "effect", "start_ms", "end_ms", "settings", "palette", "blend")
 _PALETTE_KEYS = ("colors", "brightness", "sparkles", "music_sparkles")
 PARENT_CHILD_PAIRS_LISTED = 10
+FULL_COVERAGE_EFFECTS = frozenset({"Color Wash", "Plasma", "On"})
 _EFFECT_HINTS = {
     "chase": ("SingleStrand", " (Chase is a SingleStrand mode: E_NOTEBOOK_SSEFFECT_TYPE=Chase)"),
     "vumeter": ("VU Meter", ""),
@@ -66,6 +67,7 @@ def validate_plan(
     result.errors.extend(_overlaps(indexed))
     result.placements = [p for _, p in indexed]
     result.warnings.extend(_parent_child_warnings(result.placements, show))
+    result.warnings.extend(_layer_cover_warnings(result.placements))
     return result
 
 
@@ -290,4 +292,32 @@ def _parent_child_warnings(placements: list[EffectPlacement], show: ShowConfig) 
     extra = len(ranked) - PARENT_CHILD_PAIRS_LISTED
     if extra > 0:
         warnings.append(f"... and {extra} more parent/child pair{'s' if extra != 1 else ''} lit together")
+    return warnings
+
+
+def _layer_cover_warnings(placements: list[EffectPlacement]) -> list[str]:
+    by_element: dict[str, list[EffectPlacement]] = defaultdict(list)
+    for p in placements:
+        if p.effect_name != "Off":
+            by_element[p.model_name].append(p)
+    counts: dict[tuple[str, int, int], int] = {}
+    first_effect: dict[tuple[str, int, int], str] = {}
+    for element, items in by_element.items():
+        for p in items:
+            if p.effect_name not in FULL_COVERAGE_EFFECTS or p.settings.get(LAYER_METHOD_KEY, "Normal") != "Normal":
+                continue
+            for q in items:
+                if q.layer > p.layer and p.start_time_ms < q.end_time_ms and q.start_time_ms < p.end_time_ms:
+                    key = (element, p.layer, q.layer)
+                    counts[key] = counts.get(key, 0) + 1
+                    first_effect.setdefault(key, p.effect_name)
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    warnings = [
+        f"{n} moment{'s' if n != 1 else ''} where {first_effect[key]} on {key[0]} layer {key[1]} hides layer {key[2]} "
+        "(layer 0 is drawn on top: put bases on the highest layer, or give the upper effect a blend)"
+        for key, n in ranked[:PARENT_CHILD_PAIRS_LISTED]
+    ]
+    extra = len(ranked) - PARENT_CHILD_PAIRS_LISTED
+    if extra > 0:
+        warnings.append(f"... and {extra} more hidden layer pair{'s' if extra != 1 else ''}")
     return warnings
