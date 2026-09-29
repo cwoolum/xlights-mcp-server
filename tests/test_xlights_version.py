@@ -5,18 +5,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 from xlights_mcp.xlights import version
 from xlights_mcp.xlights.version import installed_xlights_version
 from xlights_mcp.xlights.xsq_writer import DEFAULT_XLIGHTS_VERSION
-
-
-@pytest.fixture(autouse=True)
-def _fresh_registry_cache():
-    version._registry_version.cache_clear()
-    yield
-    version._registry_version.cache_clear()
 
 
 def _sequence(folder: Path, name: str, xlights_version: str) -> None:

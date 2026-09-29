@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import sys
-from functools import lru_cache
 from pathlib import Path
 
 from xlights_mcp.xlights.xsq_writer import DEFAULT_XLIGHTS_VERSION, HEAD_BYTES
@@ -25,7 +24,6 @@ def installed_xlights_version(show_path: Path | None = None) -> str:
     return _show_folder_version(show_path) or DEFAULT_XLIGHTS_VERSION
 
 
-@lru_cache(maxsize=1)
 def _registry_version() -> str | None:
     try:
         entries = _read_uninstall_entries()

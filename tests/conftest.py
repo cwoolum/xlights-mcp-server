@@ -10,8 +10,6 @@ import pytest
 import soundfile as sf
 from show_fixtures import SHOW_GROUPS
 
-from xlights_mcp.xlights.xsq_writer import DEFAULT_XLIGHTS_VERSION
-
 
 @pytest.fixture(autouse=True)
 def _stub_heavy_backends(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -41,14 +39,6 @@ def _stub_heavy_backends(request: pytest.FixtureRequest, monkeypatch: pytest.Mon
     monkeypatch.setattr(analyzer, "separate_stems", lambda _path, **_kw: StemPaths(available=False))
     if not request.node.get_closest_marker("real_madmom_grid"):
         monkeypatch.setattr(beats, "_madmom_grid", lambda _path: None)
-
-
-@pytest.fixture(autouse=True)
-def _pin_installed_xlights_version(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Written sequences carry a fixed version rather than whatever xLights is installed here."""
-    monkeypatch.setattr(
-        "xlights_mcp.sequencer.plan_writer.installed_xlights_version", lambda _show_path: DEFAULT_XLIGHTS_VERSION
-    )
 
 
 @pytest.fixture

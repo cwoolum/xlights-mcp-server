@@ -27,9 +27,12 @@ def test_auto_mode_writes_effects_with_refs_and_palettes(
     )
     save_cached(analysis, click_track, audio.cache_dir)
 
-    result = generate_sequence(mp3_path=click_track, show_path=show_copy, mode="auto", audio_config=audio)
+    result = generate_sequence(
+        mp3_path=click_track, show_path=show_copy, mode="auto", audio_config=audio, xlights_version="2026.17"
+    )
 
     root = ET.parse(result["output_path"]).getroot()
+    assert root.findtext("head/version") == "2026.17"
     effects = [e for e in root.iter("Effect") if e.get("name")]
     assert effects
     assert all(e.get("ref") is not None and e.get("palette") is not None for e in effects)

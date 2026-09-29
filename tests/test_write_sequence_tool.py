@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import xml.etree.ElementTree as ET
 from functools import partial
 from pathlib import Path
 
@@ -37,6 +38,14 @@ async def test_writes_a_plan_into_the_active_show(show, click_track):
 
     assert report["written"] is True and report["errors"] == []
     assert Path(report["path"]) == show / f"{click_track.stem}.xsq"
+
+
+async def test_the_written_head_carries_the_installed_xlights_version(show, click_track, monkeypatch):
+    monkeypatch.setattr("xlights_mcp.xlights.version.installed_xlights_version", lambda _show_path: "2031.3")
+
+    report = await _call({"mp3_path": str(click_track), "plan": PLAN})
+
+    assert ET.parse(report["path"]).getroot().findtext("head/version") == "2031.3"
 
 
 async def test_plan_path_resolves_against_the_show_folder(show, click_track):

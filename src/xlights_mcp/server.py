@@ -656,6 +656,7 @@ async def create_sequence(
             shows so you can ask the user which one to use.
     """
     from xlights_mcp.sequencer.engine import generate_sequence
+    from xlights_mcp.xlights.version import installed_xlights_version
 
     path = Path(mp3_path).expanduser()
     if not path.exists():
@@ -680,6 +681,7 @@ async def create_sequence(
             audio_config=config.audio,
             vocal_assignments=vocal_assignments,
             progress=on_progress,
+            xlights_version=installed_xlights_version(show_path),
         )
     )
 
@@ -740,6 +742,7 @@ async def write_sequence(
         validate_only: Run every check and return the report without writing
     """
     from xlights_mcp.sequencer.plan_writer import write_plan
+    from xlights_mcp.xlights.version import installed_xlights_version
 
     config = get_config()
     show_path = _active_show(config)
@@ -770,6 +773,7 @@ async def write_sequence(
             timing_tracks=timing_tracks or [],
             overwrite=overwrite,
             validate_only=validate_only,
+            xlights_version=installed_xlights_version(show_path),
         )
     )
 
