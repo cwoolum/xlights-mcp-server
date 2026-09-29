@@ -266,6 +266,37 @@ def _free_sequence_name(show_path: Path, stem: str) -> str:
     return name
 
 
+def _free_track_name(name: str, taken: set[str]) -> str:
+    if name not in taken:
+        return name
+    candidate, n = f"{name} (lyrics)", 2
+    while candidate in taken:
+        candidate, n = f"{name} (lyrics) {n}", n + 1
+    return candidate
+
+
+def _renamed_lyric_tracks(
+    tracks: list[LyricTrack], taken: set[str], warnings: list[str]
+) -> tuple[list[LyricTrack], dict[str, LyricTrack]]:
+    """The tracks renamed away from names already taken, and a lookup by old and new name."""
+    taken = set(taken)
+    renamed: list[LyricTrack] = []
+    by_name: dict[str, LyricTrack] = {}
+    for original in tracks:
+        name = _free_track_name(original.track_name, taken)
+        taken.add(name)
+        if name != original.track_name:
+            warnings.append(
+                f"lyric track {original.track_name!r} renamed to {name!r}: a model, group or "
+                "timing track already has that name"
+            )
+        track = original.model_copy(update={"track_name": name})
+        renamed.append(track)
+        by_name.setdefault(original.track_name, track)
+        by_name[name] = track
+    return renamed, by_name
+
+
 def _framed_marks(marks: list[tuple[str, float, float]], song_end: int) -> list[TimingTrackLabel]:
     """Frame-rounded marks clipped to the song, sorted, each ending by the next one's start."""
     framed = sorted(
@@ -337,6 +368,14 @@ def _generate_auto(
     faces: list[dict] = []
     lyric_tracks: list[TimingTrack] = []
     assignments: dict[str, str] = {}
+    elements = show_config.element_names
+    stems = STEM_TIMING_TRACKS if analysis.stem_analysis.available else ()
+    named_tracks = []
+    for name in ("Beats", "Bars", *stems):
+        if name in elements:
+            warnings.append(f"{name} timing track skipped: the show has a model or group with that name")
+        else:
+            named_tracks.append(name)
 
     if singing:
         vocal_tracks = _try_extract_vocal_tracks(mp3_path)
@@ -361,7 +400,7 @@ def _generate_auto(
                 ),
             }
         else:
-            by_name = {t.track_name: t for t in vocal_tracks}
+            vocal_tracks, by_name = _renamed_lyric_tracks(vocal_tracks, elements | set(named_tracks), warnings)
             for model, face_definition in singing.items():
                 requested = vocal_assignments.get("all", vocal_assignments.get(model))
                 track = by_name.get(requested, vocal_tracks[0])
@@ -372,16 +411,15 @@ def _generate_auto(
 
     baseline = build_baseline_plan(analysis, show_config, colors, frozenset(singing) if faces else frozenset())
     plan = [p for p in baseline if p["element"] not in singing] + faces
-    stems = STEM_TIMING_TRACKS if analysis.stem_analysis.available else ()
     report = write_plan(
         plan, analysis, mp3_path, show_path,
         name=_free_sequence_name(show_path, mp3_path.stem),
-        timing_tracks=("Beats", "Bars", *stems),
+        timing_tracks=named_tracks,
         extra_tracks=lyric_tracks,
         show=show_config,
     )
     if not report["written"]:
-        return {"error": "The baseline plan failed validation; this is a bug.", "report": report}
+        return {"error": "The baseline plan failed validation.", "errors": report["errors"], "report": report}
 
     return {
         "success": True,

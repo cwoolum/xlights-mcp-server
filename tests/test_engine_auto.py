@@ -46,6 +46,20 @@ def _elements(path: str) -> dict[str, list[ET.Element]]:
     }
 
 
+def _faces_timing_tracks(path: str, model: str) -> list[str]:
+    root = ET.parse(path).getroot()
+    db = [e.text or "" for e in root.iterfind("EffectDB/Effect")]
+    settings = [dict(kv.split("=", 1) for kv in db[int(e.get("ref"))].split(",")) for e in _elements(path)[model]
+                if e.get("name") == "Faces"]
+    return [s["E_CHOICE_Faces_TimingTrack"] for s in settings]
+
+
+def _add_groups(show: Path, *names: str) -> None:
+    xml = show / "xlights_rgbeffects.xml"
+    groups = "".join(f'<modelGroup name="{n}" models="Door L,Door R"/>' for n in names)
+    xml.write_text(xml.read_text(encoding="utf-8").replace("</modelGroups>", f"{groups}</modelGroups>"), encoding="utf-8")
+
+
 def test_writes_the_baseline_with_beats_and_bars(click_track, show_copy, audio):
     result = _generate(click_track, show_copy, audio, palette_hint="orange and teal")
 
@@ -57,6 +71,16 @@ def test_writes_the_baseline_with_beats_and_bars(click_track, show_copy, audio):
     assert result["total_effects"] > 0
     elements = _elements(result["output_path"])
     assert elements["Everything Flat"][0].get("name") == "Color Wash"
+
+
+def test_a_timing_track_named_like_a_show_element_is_left_out(click_track, show_copy, audio):
+    _add_groups(show_copy, "Beats")
+
+    result = _generate(click_track, show_copy, audio)
+
+    assert result["success"] is True
+    assert result["timing_tracks"] == ["Bars"]
+    assert any("Beats timing track skipped" in w for w in result["warnings"])
 
 
 def test_never_overwrites_an_existing_sequence(click_track, show_copy, audio):
@@ -151,3 +175,23 @@ def test_faces_are_sequenced_and_groups_holding_them_left_out(click_track, singi
     assert any(e.get("name") == "Faces" for e in elements["Lantern2"])
     assert not elements.get("Lanterns") and not elements.get("Everything Flat")
     assert "Vocals" in result["timing_tracks"]
+
+
+@pytest.mark.parametrize(
+    "groups, renamed", [(("Door",), "Door (lyrics)"), (("Door", "Door (lyrics)"), "Door (lyrics) 2")]
+)
+def test_a_lyric_track_named_like_a_show_element_is_renamed(
+    click_track, singing_show, audio, monkeypatch, groups, renamed
+):
+    _add_groups(singing_show, *[g for g in groups if g != "Door"])
+    monkeypatch.setattr(
+        engine, "_try_extract_vocal_tracks", lambda _path: [_lyrics().model_copy(update={"track_name": "Door"})]
+    )
+
+    result = _generate(click_track, singing_show, audio, vocal_assignments={"all": "Door"})
+
+    assert result["success"] is True
+    assert result["timing_tracks"] == ["Beats", "Bars", renamed]
+    assert result["vocal_assignments"] == {"Lantern2": renamed}
+    assert _faces_timing_tracks(result["output_path"], "Lantern2") == [renamed]
+    assert any(f"renamed to {renamed!r}" in w for w in result["warnings"])
