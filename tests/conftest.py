@@ -1,12 +1,14 @@
-"""Shared fixtures for audio analysis tests."""
+"""Shared fixtures: hermetic audio backends, a click track and a writable show copy."""
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import numpy as np
 import pytest
 import soundfile as sf
+from show_fixtures import SHOW_GROUPS
 
 
 @pytest.fixture(autouse=True)
@@ -51,3 +53,12 @@ def click_track(tmp_path: Path) -> Path:
     path = tmp_path / "click.wav"
     sf.write(path, y, sr)
     return path
+
+
+@pytest.fixture
+def show_copy(tmp_path: Path) -> Path:
+    """A writable copy of the show_groups fixture's layout in tmp_path / "show"."""
+    show = tmp_path / "show"
+    show.mkdir()
+    shutil.copy(SHOW_GROUPS / "xlights_rgbeffects.xml", show)
+    return show

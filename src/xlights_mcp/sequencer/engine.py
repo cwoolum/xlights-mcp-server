@@ -1,205 +1,160 @@
-"""Sequence generation engine — orchestrates audio analysis → effect placement → .xsq output.
-
-Architecture: 3-layer approach matching professional sequencing patterns:
-  Layer 0 (background bed): Sustained effects that run the full section — twinkle, color wash, plasma
-  Layer 1 (mid-layer motion): Rhythmic/directional effects synced to downbeats — chase, spirals
-  Layer 2 (accent hits): Punchy effects on select beats — shockwave, morph, strobe
-
-Models are assigned ROLES based on their physical type:
-  - House outline/rooflines → bass pulse, slow morphs
-  - Arches / candy canes → rhythmic chases, mirrored directions
-  - Tree → spirals, pinwheels, meteors
-  - Custom props → shockwaves, circles, warp
-  - Windows / doors → marquee, color wash
-  - Flakes / spinners → twinkle, shimmer, pinwheel
-
-Palettes cycle per phrase (every 2-4 bars) for variety, not just per section.
-"""
+"""Sequence generation: the create_sequence baseline plan, singing faces, and the guided preview."""
 
 from __future__ import annotations
 
 import logging
-import random
+from collections import Counter
 from pathlib import Path
+from typing import Literal, NamedTuple
 
-from xlights_mcp.audio.analyzer import ProgressCallback, SongAnalysis, StemAnalysis, full_analysis
-from xlights_mcp.audio.structure import SongSection
+from xlights_mcp.audio.analyzer import ProgressCallback, SongAnalysis, full_analysis
+from xlights_mcp.audio.lyrics import LyricTrack
+from xlights_mcp.audio.sections import SongSection
 from xlights_mcp.config import AudioConfig
-from xlights_mcp.xlights.layout import show_tiers
-from xlights_mcp.xlights.models import LightModel, ShowConfig
-from xlights_mcp.xlights.palettes import ColorPalette, get_theme_palettes
+from xlights_mcp.sequencer.plan_writer import write_plan
+from xlights_mcp.sequencer.timing import STEM_TRACK_NAMES, last_frame_ms, to_frame
+from xlights_mcp.xlights.layout import build_show_layout
+from xlights_mcp.xlights.models import ShowConfig
+from xlights_mcp.xlights.palettes import palette_colors
 from xlights_mcp.xlights.show import load_show_config
-from xlights_mcp.xlights.xsq_writer import (
-    EffectPlacement, SequenceSpec, TimingTrack, TimingTrackLabel, write_xsq,
-)
+from xlights_mcp.xlights.xsq_writer import TimingTrack, TimingTrackLabel
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Professional effect settings — extracted from real human-made sequences
-# Multiple variants per effect type for variety
+# Effect presets: key → (xLights effect name, settings from real human-made sequences)
 # ---------------------------------------------------------------------------
 
-EFFECT_VARIANTS: dict[str, list[dict[str, str]]] = {
-    "Shockwave_hit": [
-        # Big expanding shockwave for impact moments
-        {"E_CHECKBOX_Shockwave_Blend_Edges": "1", "E_CHECKBOX_Shockwave_Scale": "0",
-         "E_SLIDER_Shockwave_Accel": "3", "E_SLIDER_Shockwave_CenterX": "50",
-         "E_SLIDER_Shockwave_CenterY": "50", "E_SLIDER_Shockwave_End_Radius": "100",
-         "E_SLIDER_Shockwave_End_Width": "5", "E_SLIDER_Shockwave_Start_Radius": "1",
-         "E_SLIDER_Shockwave_Start_Width": "25"},
-        # Tight imploding shockwave
-        {"E_CHECKBOX_Shockwave_Blend_Edges": "1", "E_CHECKBOX_Shockwave_Scale": "0",
-         "E_SLIDER_Shockwave_Accel": "0", "E_SLIDER_Shockwave_CenterX": "50",
-         "E_SLIDER_Shockwave_CenterY": "50", "E_SLIDER_Shockwave_End_Radius": "0",
-         "E_SLIDER_Shockwave_End_Width": "25", "E_SLIDER_Shockwave_Start_Radius": "100",
-         "E_SLIDER_Shockwave_Start_Width": "5"},
-        # Wide dramatic shockwave
-        {"E_CHECKBOX_Shockwave_Blend_Edges": "1", "E_CHECKBOX_Shockwave_Scale": "0",
-         "E_SLIDER_Shockwave_Accel": "0", "E_SLIDER_Shockwave_CenterX": "50",
-         "E_SLIDER_Shockwave_CenterY": "50", "E_SLIDER_Shockwave_End_Radius": "245",
-         "E_SLIDER_Shockwave_End_Width": "50", "E_SLIDER_Shockwave_Start_Radius": "1",
-         "E_SLIDER_Shockwave_Start_Width": "10"},
-    ],
-    "Chase_left": [
+EFFECT_PRESETS: dict[str, tuple[str, dict[str, str]]] = {
+    "Chase_left": (
+        "SingleStrand",
         {"B_CHOICE_BufferStyle": "Per Model Single Line", "E_CHECKBOX_Chase_Group_All": "0",
          "E_CHOICE_Chase_Type1": "Left-Right", "E_CHOICE_Fade_Type": "None",
          "E_CHOICE_SingleStrand_Colors": "Palette", "E_NOTEBOOK_SSEFFECT_TYPE": "Chase",
          "E_SLIDER_Color_Mix1": "36", "E_SLIDER_Number_Chases": "1",
-         "E_SLIDER_Chase_Rotations": "1"},
-    ],
-    "Chase_right": [
+         "E_TEXTCTRL_Chase_Rotations": "1.0"},
+    ),
+    "Chase_right": (
+        "SingleStrand",
         {"B_CHOICE_BufferStyle": "Per Model Single Line", "E_CHECKBOX_Chase_Group_All": "0",
          "E_CHOICE_Chase_Type1": "Right-Left", "E_CHOICE_Fade_Type": "None",
          "E_CHOICE_SingleStrand_Colors": "Palette", "E_NOTEBOOK_SSEFFECT_TYPE": "Chase",
          "E_SLIDER_Color_Mix1": "36", "E_SLIDER_Number_Chases": "1",
-         "E_SLIDER_Chase_Rotations": "1"},
-    ],
-    "Chase_from_middle": [
+         "E_TEXTCTRL_Chase_Rotations": "1.0"},
+    ),
+    "Chase_from_middle": (
+        "SingleStrand",
         {"B_CHOICE_BufferStyle": "Per Model Single Line", "E_CHECKBOX_Chase_Group_All": "0",
          "E_CHOICE_Chase_Type1": "From Middle", "E_CHOICE_Fade_Type": "None",
          "E_CHOICE_SingleStrand_Colors": "Palette", "E_NOTEBOOK_SSEFFECT_TYPE": "Chase",
          "E_SLIDER_Color_Mix1": "36", "E_SLIDER_Number_Chases": "1",
-         "E_SLIDER_Chase_Rotations": "1"},
-    ],
-    "Chase_bounce": [
+         "E_TEXTCTRL_Chase_Rotations": "1.0"},
+    ),
+    "Chase_bounce": (
+        "SingleStrand",
         {"B_CHOICE_BufferStyle": "Per Model Single Line", "E_CHECKBOX_Chase_Group_All": "0",
          "E_CHOICE_Chase_Type1": "Bounce from Left", "E_CHOICE_Fade_Type": "None",
          "E_CHOICE_SingleStrand_Colors": "Palette", "E_NOTEBOOK_SSEFFECT_TYPE": "Chase",
          "E_SLIDER_Color_Mix1": "36", "E_SLIDER_Number_Chases": "1",
-         "E_SLIDER_Chase_Rotations": "1"},
-    ],
-    "Morph_quick": [
-        {"E_CHECKBOX_Morph_End_Link": "0", "E_CHECKBOX_Morph_Start_Link": "0",
-         "E_CHECKBOX_ShowHeadAtStart": "0", "E_SLIDER_MorphAccel": "0",
-         "E_SLIDER_MorphDuration": "20", "E_SLIDER_MorphEndLength": "1",
-         "E_SLIDER_MorphStartLength": "1", "E_SLIDER_Morph_End_X1": "0",
-         "E_SLIDER_Morph_End_Y1": "0", "E_SLIDER_Morph_Start_X1": "100",
-         "E_SLIDER_Morph_Start_Y1": "100"},
-        {"E_CHECKBOX_Morph_End_Link": "0", "E_CHECKBOX_Morph_Start_Link": "0",
-         "E_CHECKBOX_ShowHeadAtStart": "0", "E_SLIDER_MorphAccel": "0",
-         "E_SLIDER_MorphDuration": "20", "E_SLIDER_MorphEndLength": "1",
-         "E_SLIDER_MorphStartLength": "1", "E_SLIDER_Morph_End_X1": "100",
-         "E_SLIDER_Morph_End_Y1": "100", "E_SLIDER_Morph_Start_X1": "0",
-         "E_SLIDER_Morph_Start_Y1": "0"},
-    ],
-    "Twinkle_ambient": [
+         "E_TEXTCTRL_Chase_Rotations": "1.0"},
+    ),
+    "Twinkle_ambient": (
+        "Twinkle",
         {"E_CHECKBOX_Twinkle_ReRandom": "0", "E_CHECKBOX_Twinkle_Strobe": "0",
          "E_CHOICE_Twinkle_Style": "New Render Method",
          "E_SLIDER_Twinkle_Count": "3", "E_SLIDER_Twinkle_Steps": "14",
          "T_TEXTCTRL_Fadein": "0.5", "T_TEXTCTRL_Fadeout": "1.0"},
-    ],
-    "Twinkle_dense": [
+    ),
+    "Twinkle_dense": (
+        "Twinkle",
         {"E_CHECKBOX_Twinkle_ReRandom": "0", "E_CHECKBOX_Twinkle_Strobe": "0",
          "E_CHOICE_Twinkle_Style": "New Render Method",
          "E_SLIDER_Twinkle_Count": "36", "E_SLIDER_Twinkle_Steps": "10",
          "T_TEXTCTRL_Fadein": "0.2", "T_TEXTCTRL_Fadeout": "0.5"},
-    ],
-    "ColorWash_slow": [
+    ),
+    "ColorWash_slow": (
+        "Color Wash",
         {"E_CHECKBOX_ColorWash_CircularPalette": "1", "E_TEXTCTRL_ColorWash_Cycles": "1",
          "T_TEXTCTRL_Fadein": "1.0", "T_TEXTCTRL_Fadeout": "1.0"},
-    ],
-    "ColorWash_fast": [
+    ),
+    "ColorWash_fast": (
+        "Color Wash",
         {"E_CHECKBOX_ColorWash_CircularPalette": "1", "E_TEXTCTRL_ColorWash_Cycles": "3"},
-    ],
-    "ColorWash_cycling": [
+    ),
+    "ColorWash_cycling": (
+        "Color Wash",
         {"E_CHECKBOX_ColorWash_CircularPalette": "1", "E_TEXTCTRL_ColorWash_Cycles": "20.0",
          "T_TEXTCTRL_Fadein": "2.5"},
-    ],
-    "Plasma_slow": [
+    ),
+    "Plasma_slow": (
+        "Plasma",
         {"E_CHOICE_Plasma_Color": "Normal", "E_SLIDER_Plasma_Line_Density": "1",
          "E_SLIDER_Plasma_Speed": "10", "E_SLIDER_Plasma_Style": "10",
          "T_TEXTCTRL_Fadein": "0.5", "T_TEXTCTRL_Fadeout": "0.5"},
-    ],
-    "Plasma_fast": [
+    ),
+    "Plasma_fast": (
+        "Plasma",
         {"E_CHOICE_Plasma_Color": "Normal", "E_SLIDER_Plasma_Line_Density": "1",
          "E_SLIDER_Plasma_Speed": "80", "E_SLIDER_Plasma_Style": "10",
          "T_TEXTCTRL_Fadein": "0.25", "T_TEXTCTRL_Fadeout": "0.25"},
-    ],
-    "Spirals_slow": [
+    ),
+    "Spirals_slow": (
+        "Spirals",
         {"E_CHECKBOX_Spirals_3D": "1", "E_CHECKBOX_Spirals_Blend": "0",
          "E_CHECKBOX_Spirals_Grow": "0", "E_CHECKBOX_Spirals_Shrink": "0",
          "E_SLIDER_Spirals_Count": "1", "E_SLIDER_Spirals_Rotation": "20",
          "E_SLIDER_Spirals_Thickness": "50", "E_TEXTCTRL_Spirals_Movement": "1.0",
          "T_TEXTCTRL_Fadein": "0.5", "T_TEXTCTRL_Fadeout": "0.5"},
-    ],
-    "Spirals_fast": [
+    ),
+    "Spirals_fast": (
+        "Spirals",
         {"E_CHECKBOX_Spirals_3D": "1", "E_CHECKBOX_Spirals_Blend": "0",
          "E_CHECKBOX_Spirals_Grow": "0", "E_CHECKBOX_Spirals_Shrink": "0",
          "E_SLIDER_Spirals_Count": "5", "E_SLIDER_Spirals_Rotation": "20",
          "E_SLIDER_Spirals_Thickness": "18", "E_TEXTCTRL_Spirals_Movement": "3.0"},
-    ],
-    "Spirals_reverse": [
+    ),
+    "Spirals_reverse": (
+        "Spirals",
         {"E_CHECKBOX_Spirals_3D": "1", "E_CHECKBOX_Spirals_Blend": "0",
          "E_CHECKBOX_Spirals_Grow": "0", "E_CHECKBOX_Spirals_Shrink": "0",
          "E_SLIDER_Spirals_Count": "1", "E_SLIDER_Spirals_Rotation": "-20",
          "E_SLIDER_Spirals_Thickness": "50", "E_TEXTCTRL_Spirals_Movement": "-1.0"},
-    ],
-    "Meteors_explode": [
-        {"E_CHECKBOX_Meteors_UseMusic": "0", "E_CHOICE_Meteors_Effect": "Explode",
-         "E_CHOICE_Meteors_Type": "Palette", "E_SLIDER_Meteors_Count": "5",
-         "E_SLIDER_Meteors_Length": "25", "E_SLIDER_Meteors_Speed": "10",
-         "E_SLIDER_Meteors_Swirl_Intensity": "0"},
-    ],
-    "Meteors_rain": [
+    ),
+    "Meteors_rain": (
+        "Meteors",
         {"E_CHECKBOX_Meteors_UseMusic": "0", "E_CHOICE_Meteors_Effect": "Down",
          "E_CHOICE_Meteors_Type": "Palette", "E_SLIDER_Meteors_Count": "10",
          "E_SLIDER_Meteors_Length": "25", "E_SLIDER_Meteors_Speed": "15",
          "E_SLIDER_Meteors_Swirl_Intensity": "0"},
-    ],
-    "Pinwheel_sweep": [
+    ),
+    "Pinwheel_sweep": (
+        "Pinwheel",
         {"E_CHECKBOX_Pinwheel_Rotation": "1", "E_CHOICE_Pinwheel_3D": "Sweep",
          "E_CHOICE_Pinwheel_Style": "New Render Method",
          "E_SLIDER_Pinwheel_ArmSize": "150", "E_SLIDER_Pinwheel_Arms": "10",
          "E_SLIDER_Pinwheel_Speed": "5", "E_SLIDER_Pinwheel_Twist": "60"},
-    ],
-    "Butterfly_gentle": [
+    ),
+    "Butterfly_gentle": (
+        "Butterfly",
         {"E_CHOICE_Butterfly_Colors": "Palette", "E_CHOICE_Butterfly_Direction": "Normal",
          "E_SLIDER_Butterfly_Chunks": "1", "E_SLIDER_Butterfly_Skip": "2",
          "E_SLIDER_Butterfly_Speed": "10", "E_SLIDER_Butterfly_Style": "1",
          "T_TEXTCTRL_Fadein": "0.25", "T_TEXTCTRL_Fadeout": "0.25"},
-    ],
-    "Warp_mirror": [
-        {"E_CHOICE_Warp_Treatment_APPLYLAST": "constant", "E_CHOICE_Warp_Type": "mirror",
-         "E_SLIDER_Warp_X": "50", "E_SLIDER_Warp_Y": "50"},
-    ],
-    "Warp_wavy": [
-        {"E_CHOICE_Warp_Treatment_APPLYLAST": "constant", "E_CHOICE_Warp_Type": "wavy",
-         "E_SLIDER_Warp_Speed": "40"},
-    ],
-    "Marquee_default": [
+    ),
+    "Marquee_default": (
+        "Marquee",
         {"E_SLIDER_Marquee_Band_Size": "3", "E_SLIDER_Marquee_Skip_Size": "3",
          "E_SLIDER_Marquee_Speed": "3", "E_SLIDER_Marquee_Stagger": "0"},
-    ],
-    "On_solid": [{}],
+    ),
+    "On_solid": ("On", {}),
 }
 
 
 # ---------------------------------------------------------------------------
-# Model role assignments — what role each model type plays in the show
+# Feature-group effects by the group's majority model category
 # ---------------------------------------------------------------------------
 
-# Background bed effects per model category (Layer 0)
+# Sections below HIGH_ENERGY_THRESHOLD
 BED_EFFECTS: dict[str, list[str]] = {
     "arch": ["ColorWash_slow", "Twinkle_ambient"],
     "tree": ["Spirals_slow", "Plasma_slow", "ColorWash_cycling"],
@@ -210,193 +165,32 @@ BED_EFFECTS: dict[str, list[str]] = {
     "other": ["ColorWash_slow", "Twinkle_ambient"],
 }
 
-# Mid-layer motion effects per model category (Layer 1) — synced to bars/downbeats
+# Sections at or above HIGH_ENERGY_THRESHOLD
 MOTION_EFFECTS: dict[str, list[str]] = {
     "arch": ["Chase_from_middle", "Chase_left", "Chase_right", "Chase_bounce"],
     "tree": ["Spirals_fast", "Spirals_reverse", "Pinwheel_sweep", "Meteors_rain"],
     "single_line": ["Chase_left", "Chase_right", "Chase_bounce"],
     "poly_line": ["Chase_left", "Chase_right", "Chase_from_middle"],
     "window": ["Marquee_default"],
-    "custom": ["Plasma_fast", "Warp_mirror", "Warp_wavy"],
+    "custom": ["Plasma_fast", "Butterfly_gentle"],
     "other": ["Chase_from_middle", "ColorWash_fast"],
 }
 
-# Accent effects per model category (Layer 2) — on select beats only
-ACCENT_EFFECTS: dict[str, list[str]] = {
-    "arch": ["Morph_quick", "Shockwave_hit"],
-    "tree": ["Shockwave_hit", "Meteors_explode"],
-    "single_line": ["Morph_quick"],
-    "poly_line": ["Morph_quick"],
-    "window": ["Shockwave_hit"],
-    "custom": ["Shockwave_hit", "Morph_quick"],
-    "other": ["Shockwave_hit"],
-}
-
-# Section energy thresholds
 HIGH_ENERGY_THRESHOLD = 0.65
 LOW_ENERGY_THRESHOLD = 0.35
 
 
-# ---------------------------------------------------------------------------
-# Stem-driven effect overrides — when a stem dominates, shift effect choices
-# ---------------------------------------------------------------------------
+SectionRole = Literal["wash", "features", "accents"]
 
-# Motion effects to prefer when a specific stem dominates the section
-STEM_MOTION_OVERRIDES: dict[str, dict[str, list[str]]] = {
-    "drums": {
-        "arch": ["Chase_left", "Chase_right", "Chase_bounce"],
-        "tree": ["Meteors_rain", "Meteors_explode"],
-        "single_line": ["Chase_left", "Chase_right", "Chase_bounce"],
-        "poly_line": ["Chase_left", "Chase_right"],
-        "window": ["Marquee_default"],
-        "custom": ["Plasma_fast", "Warp_wavy"],
-        "other": ["Chase_from_middle", "ColorWash_fast"],
-    },
-    "bass": {
-        "arch": ["ColorWash_fast", "Chase_from_middle"],
-        "tree": ["Spirals_slow", "Pinwheel_sweep"],
-        "single_line": ["ColorWash_fast", "Chase_from_middle"],
-        "poly_line": ["ColorWash_fast"],
-        "window": ["ColorWash_fast"],
-        "custom": ["Plasma_slow", "Warp_mirror"],
-        "other": ["ColorWash_fast"],
-    },
-    "vocals": {
-        "arch": ["ColorWash_slow", "Twinkle_ambient"],
-        "tree": ["Spirals_slow", "Plasma_slow"],
-        "single_line": ["ColorWash_slow"],
-        "poly_line": ["ColorWash_slow"],
-        "window": ["ColorWash_slow"],
-        "custom": ["Butterfly_gentle", "Twinkle_ambient"],
-        "other": ["ColorWash_slow"],
-    },
-    "other": {
-        "arch": ["Chase_left", "Chase_right", "Chase_from_middle"],
-        "tree": ["Spirals_fast", "Spirals_reverse", "Pinwheel_sweep"],
-        "single_line": ["Chase_left", "Chase_right"],
-        "poly_line": ["Chase_left", "Chase_right"],
-        "window": ["Marquee_default"],
-        "custom": ["Plasma_fast", "Warp_wavy", "Warp_mirror"],
-        "other": ["Chase_from_middle"],
-    },
+SECTION_TYPE_CONFIG: dict[str, SectionRole] = {
+    "intro": "wash", "outro": "wash", "breakdown": "wash",
+    "chorus": "accents", "drop": "accents", "instrumental": "accents",
+    "verse": "features", "bridge": "features", "build": "features",
+    "transition": "features", "unknown": "features",
 }
-
-# Accent effects to prefer when a specific stem dominates
-STEM_ACCENT_OVERRIDES: dict[str, list[str]] = {
-    "drums": ["Shockwave_hit", "Morph_quick"],
-    "bass": ["Morph_quick"],
-    "vocals": [],  # suppress accents during vocal sections
-    "other": ["Shockwave_hit"],
-}
-
-# Section-type → effect palette guidance
-SECTION_TYPE_CONFIG: dict[str, dict] = {
-    "intro": {"use_motion": False, "use_accents": False, "bed_override": "ColorWash_slow"},
-    "outro": {"use_motion": False, "use_accents": False, "bed_override": "Twinkle_ambient"},
-    "verse": {"use_motion": True, "use_accents": False},
-    "chorus": {"use_motion": True, "use_accents": True},
-    "bridge": {"use_motion": True, "use_accents": True,
-               "motion_override": {"tree": ["Pinwheel_sweep", "Spirals_reverse"],
-                                   "custom": ["Warp_mirror", "Warp_wavy"],
-                                   "arch": ["Chase_bounce"],
-                                   "single_line": ["Chase_bounce"],
-                                   "poly_line": ["Chase_bounce"]}},
-    "transition": {"use_motion": False, "use_accents": False, "bed_override": "ColorWash_slow"},
-    "unknown": {"use_motion": True, "use_accents": False},
-    "instrumental": {"use_motion": True, "use_accents": True},
-}
-
-# Drum-derived labels reuse the closest existing behaviour until they get their own recipes.
-SECTION_TYPE_CONFIG["build"] = SECTION_TYPE_CONFIG["transition"]
-SECTION_TYPE_CONFIG["drop"] = SECTION_TYPE_CONFIG["chorus"]
-SECTION_TYPE_CONFIG["breakdown"] = SECTION_TYPE_CONFIG["bridge"]
-
-
-# ---------------------------------------------------------------------------
-# Model grouping — auto-detect groups from model names
-# ---------------------------------------------------------------------------
-
-# Patterns to detect model groups: (group_name, name_patterns, model_category_override)
-# DEPRECATED — kept only as fallback when show has no xLights-defined model groups
-_LEGACY_GROUP_PATTERNS: list[tuple[str, list[str], str | None]] = [
-    ("canes", ["Left Cane", "Right Cane"], "arch"),
-    ("arches", ["Arches-"], "arch"),
-    ("flakes", ["Flake "], "custom"),
-    ("spinners", ["Spinner "], "custom"),
-    ("rooflines", ["Roofline", "Roof Peak", "Garage Roofline", "Porch Roofline"], "single_line"),
-    ("pillars", ["Pillar"], "single_line"),
-    ("windows_doors", ["Window", "Door"], "window"),
-    ("bulbs", ["Bulb "], "custom"),
-]
-
-
-def _detect_model_groups(
-    models: list[LightModel],
-    show_config: ShowConfig,
-) -> tuple[
-    dict[str, list[LightModel]],  # group_name → member models
-    list[LightModel],              # ungrouped models
-    dict[str, str],                # group_name → model_category
-]:
-    """Auto-detect model groups from the show's feature-tier xLights groups.
-
-    Groups are tiered by classify_groups, honoring the show's xlights-mcp.json
-    overrides; only feature-tier groups with at least two models are used.
-    Falls back to common-prefix grouping when no feature-tier group qualifies.
-
-    Returns grouped models (effects applied identically to all members),
-    ungrouped models (effects applied individually), and category overrides.
-    """
-    model_by_name: dict[str, LightModel] = {m.name: m for m in models}
-
-    # --- Strategy 1: xLights-defined feature-tier groups ---
-    if show_config.model_groups:
-        tiers, tier_warnings = show_tiers(show_config)
-        for warning in tier_warnings:
-            logger.info(warning)
-        groups: dict[str, list[LightModel]] = {}
-        group_categories: dict[str, str] = {}
-        grouped_names: set[str] = set()
-
-        for mg in show_config.model_groups:
-            if tiers[mg.name][0] != "feature":
-                continue
-            members = [model_by_name[n] for n in mg.leaf_models if n in model_by_name]
-            if len(members) >= 2:
-                groups[mg.name] = members
-                grouped_names.update(m.name for m in members)
-                cats = [m.model_category for m in members]
-                group_categories[mg.name] = max(set(cats), key=cats.count)
-
-        if groups:
-            ungrouped = [m for m in models if m.name not in grouped_names]
-            logger.info(f"Using {len(groups)} xLights feature-tier groups")
-            return groups, ungrouped, group_categories
-
-    # --- Strategy 2: Automatic common-prefix grouping ---
-    # Group models that share a common prefix (e.g. "Left Cane 1", "Left Cane 2" → "left_cane")
-    groups = {}
-    group_categories = {}
-    grouped_names: set[str] = set()
-
-    prefix_buckets: dict[str, list[LightModel]] = {}
-    for model in models:
-        # Strip trailing digits/spaces to find the base prefix
-        name = model.name.rstrip("0123456789 -")
-        if name and name != model.name:
-            prefix_buckets.setdefault(name, []).append(model)
-
-    for prefix, members in prefix_buckets.items():
-        if len(members) >= 2:
-            group_key = prefix.strip().lower().replace(" ", "_")
-            groups[group_key] = members
-            grouped_names.update(m.name for m in members)
-            cats = [m.model_category for m in members]
-            group_categories[group_key] = max(set(cats), key=cats.count)
-
-    ungrouped = [m for m in models if m.name not in grouped_names]
-    logger.info(f"Auto-detected {len(groups)} model groups by common prefix")
-    return groups, ungrouped, group_categories
+ACCENT_MS = 100
+WASH_BRIGHTNESS = 40
+FACE_BED_KEYS = ("Twinkle_ambient", "ColorWash_cycling", "Butterfly_gentle")
 
 
 def generate_sequence(
@@ -409,7 +203,7 @@ def generate_sequence(
     vocal_assignments: dict[str, str] | None = None,
     progress: ProgressCallback | None = None,
 ) -> dict:
-    """Generate a complete xLights sequence from a music file.
+    """Write the baseline sequence for a music file (auto), or return the guided preview.
 
     Args:
         vocal_assignments: Optional mapping of model_name → vocal track name.
@@ -421,8 +215,8 @@ def generate_sequence(
         return {"error": f"Show path not found: {show_path}"}
 
     show_config = load_show_config(show_path)
-    if not show_config.models:
-        return {"error": "No models found in show configuration"}
+    if not show_config.real_models:
+        return {"error": "No models with lights found in show configuration"}
 
     analysis = full_analysis(mp3_path, audio_config, progress=progress)
 
@@ -479,6 +273,100 @@ def preview_sequence_plan(
 # ---------------------------------------------------------------------------
 
 
+def _free_sequence_name(show_path: Path, stem: str) -> str:
+    name, counter = stem, 1
+    while (show_path / f"{name}.xsq").exists():
+        name = f"{stem} (generated {counter})"
+        counter += 1
+    return name
+
+
+def _free_track_name(name: str, taken: set[str]) -> str:
+    if name not in taken:
+        return name
+    candidate, n = f"{name} (lyrics)", 2
+    while candidate in taken:
+        candidate, n = f"{name} (lyrics) {n}", n + 1
+    return candidate
+
+
+def _renamed_lyric_tracks(
+    tracks: list[LyricTrack], taken: set[str], warnings: list[str]
+) -> tuple[list[LyricTrack], dict[str, LyricTrack]]:
+    """The tracks renamed away from names already taken, and a lookup by old and new name."""
+    taken = set(taken)
+    renamed: list[LyricTrack] = []
+    by_name: dict[str, LyricTrack] = {}
+    for original in tracks:
+        name = _free_track_name(original.track_name, taken)
+        taken.add(name)
+        if name != original.track_name:
+            warnings.append(
+                f"lyric track {original.track_name!r} renamed to {name!r}: a model, group or "
+                "timing track already has that name"
+            )
+        track = original.model_copy(update={"track_name": name})
+        renamed.append(track)
+        by_name.setdefault(original.track_name, track)
+        by_name[name] = track
+    return renamed, by_name
+
+
+def _framed_marks(marks: list[tuple[str, float, float]], song_end: int) -> list[TimingTrackLabel]:
+    """Frame-rounded marks clipped to the song, sorted, each ending by the next one's start."""
+    framed = sorted(
+        (to_frame(start), min(to_frame(end), song_end), label) for label, start, end in marks
+    )
+    framed = [m for m in framed if m[1] > m[0]]
+    labels = []
+    for k, (start, end, label) in enumerate(framed):
+        if k + 1 < len(framed):
+            end = min(end, framed[k + 1][0])
+        if end > start:
+            labels.append(TimingTrackLabel(label=label, start_time_ms=start, end_time_ms=end))
+    return labels
+
+
+def _lyric_timing_track(track: LyricTrack, song_end: int) -> TimingTrack:
+    words = _framed_marks([(w.word, w.start_time * 1000, w.end_time * 1000) for w in track.words], song_end)
+    phonemes = _framed_marks([(p.phoneme, p.start_time_ms, p.end_time_ms) for p in track.phonemes], song_end)
+    return TimingTrack(name=track.track_name, labels=[words, words, phonemes])
+
+
+def _face_placements(
+    analysis: SongAnalysis, model: str, face_definition: str, track_name: str, colors: list[str]
+) -> list[dict]:
+    palette = {"colors": colors}
+    song_end = last_frame_ms(analysis.duration_ms)
+    plan = []
+    for index, section in enumerate(analysis.sections):
+        span = _section_span(section, song_end)
+        if span is None:
+            continue
+        if section.energy_level >= HIGH_ENERGY_THRESHOLD:
+            key = "Twinkle_dense"
+        elif section.energy_level < LOW_ENERGY_THRESHOLD:
+            key = "ColorWash_slow"
+        else:
+            key = FACE_BED_KEYS[index % len(FACE_BED_KEYS)]
+        plan.append(_placement(model, 0, key, *span, palette))
+    plan.append({
+        "element": model, "layer": 1, "effect": "Faces", "start_ms": 0, "end_ms": song_end,
+        "settings": {
+            "E_CHECKBOX_Faces_Outline": "1",
+            "E_CHOICE_Faces_EyeBlinkDuration": "Normal",
+            "E_CHOICE_Faces_EyeBlinkFrequency": "Normal",
+            "E_CHOICE_Faces_Eyes": "Auto",
+            "E_CHOICE_Faces_FaceDefinition": face_definition,
+            "E_CHOICE_Faces_TimingTrack": track_name,
+            "T_TEXTCTRL_Fadein": "0.5",
+            "T_TEXTCTRL_Fadeout": "0.5",
+        },
+        "palette": palette,
+    })
+    return plan
+
+
 def _generate_auto(
     analysis: SongAnalysis,
     show_config: ShowConfig,
@@ -487,421 +375,114 @@ def _generate_auto(
     theme: str | None,
     vocal_assignments: dict[str, str] | None = None,
 ) -> dict:
-    """Professional-quality automatic sequence generation.
-
-    Uses a 3-layer approach with model group synchronization:
-      Layer 0: Background bed (twinkle, wash) — runs full section
-      Layer 1: Motion (chase, spirals) — synced to bars
-      Layer 2: Accent hits (shockwave, morph) — on select downbeats only
-
-    Grouped models (canes, arches, etc.) get identical effects for synchronization.
-    """
-    rng = random.Random(hash(mp3_path.stem))  # deterministic per song
-
-    # Build palette pool
-    theme_palettes = get_theme_palettes(theme)
-    palette_pool = list(theme_palettes.values())
-    if not palette_pool:
-        palette_pool = [ColorPalette(colors=["#FFFFFF"], active_colors=[1])]
-
-    all_palettes: list[ColorPalette] = list(palette_pool)
-    all_effects: list[EffectPlacement] = []
-
-    # Pre-compute beats within each section
-    section_beats = _precompute_section_beats(analysis)
-    section_downbeats = _precompute_section_downbeats(analysis)
-
-    # Detect model groups (uses xLights-defined groups, falls back to prefix detection)
-    models = show_config.real_models
-    groups, ungrouped, group_categories = _detect_model_groups(models, show_config)
-    logger.info(f"Detected {len(groups)} model groups, {len(ungrouped)} ungrouped models")
-    for gname, members in groups.items():
-        logger.info(f"  Group '{gname}': {[m.name for m in members]}")
-
-    # Identify singing models (models with face definitions) — exclude from regular pipeline
-    singing_models: dict[str, str] = {}  # model_name → face_definition_name
-    singing_model_names: set[str] = set()
-    for m in models:
-        if m.face_definitions:
-            singing_models[m.name] = m.face_definitions[0]
-            singing_model_names.add(m.name)
-
-    # Remove singing models from groups and ungrouped lists
-    for group_name in list(groups.keys()):
-        groups[group_name] = [m for m in groups[group_name] if m.name not in singing_model_names]
-        if not groups[group_name]:
-            del groups[group_name]
-            group_categories.pop(group_name, None)
-    ungrouped = [m for m in ungrouped if m.name not in singing_model_names]
-
-    if singing_models:
-        logger.info(f"Singing models excluded from regular pipeline: {list(singing_models.keys())}")
-
-    # Track last motion effect key to avoid consecutive repeats
-    last_motion_key_per_group: dict[str, str] = {}
-
-    # Helper to generate effects for a model category and apply to a list of model names
-    def generate_for_models(model_names: list[str], cat: str, group_seed: str):
-        group_rng = random.Random(hash(group_seed + mp3_path.stem))
-        stem_data: StemAnalysis = analysis.stem_analysis
-
-        for sec_idx, section in enumerate(analysis.sections):
-            is_high = section.energy_level >= HIGH_ENERGY_THRESHOLD
-            is_low = section.energy_level < LOW_ENERGY_THRESHOLD
-
-            pal_idx = (sec_idx // 2 + hash(group_seed)) % len(palette_pool)
-            palette = palette_pool[pal_idx]
-
-            downbeats_in_section = section_downbeats.get(sec_idx, [])
-
-            # Determine section type config
-            sec_config = SECTION_TYPE_CONFIG.get(section.label, SECTION_TYPE_CONFIG["unknown"])
-            use_motion = sec_config.get("use_motion", True) and not is_low
-            use_accents = sec_config.get("use_accents", False) and is_high
-
-            # Determine dominant stem for this section
-            dom_stem = "other"
-            if stem_data.available:
-                dom_stem = stem_data.dominant_stem(section.start_time, section.end_time)
-
-            # --- LAYER 0: Background bed ---
-            bed_override = sec_config.get("bed_override")
-            if bed_override:
-                bed_key = bed_override
-            elif is_high:
-                bed_choices = BED_EFFECTS.get(cat, BED_EFFECTS["other"])
-                bed_key = "Twinkle_dense" if "Twinkle_ambient" in bed_choices else bed_choices[0]
-            else:
-                bed_choices = BED_EFFECTS.get(cat, BED_EFFECTS["other"])
-                bed_key = group_rng.choice(bed_choices)
-
-            bed_settings = _get_settings(bed_key)
-            for name in model_names:
-                all_effects.append(EffectPlacement(
-                    model_name=name, layer=0,
-                    effect_name=_effect_name_from_key(bed_key),
-                    start_time_ms=section.start_time_ms,
-                    end_time_ms=section.end_time_ms,
-                    settings=bed_settings, palette=palette,
-                ))
-
-            # --- LAYER 1: Motion (stem-reactive, section-varied) ---
-            if use_motion:
-                # Pick motion choices based on stem dominance and section type
-                motion_override = sec_config.get("motion_override", {}).get(cat)
-                if motion_override:
-                    motion_choices = motion_override
-                elif stem_data.available and dom_stem in STEM_MOTION_OVERRIDES:
-                    stem_motions = STEM_MOTION_OVERRIDES[dom_stem].get(cat)
-                    motion_choices = stem_motions if stem_motions else MOTION_EFFECTS.get(cat, MOTION_EFFECTS["other"])
-                else:
-                    motion_choices = MOTION_EFFECTS.get(cat, MOTION_EFFECTS["other"])
-
-                # Avoid repeating the same motion as the previous section
-                last_key = last_motion_key_per_group.get(group_seed)
-                available = [k for k in motion_choices if k != last_key]
-                if not available:
-                    available = motion_choices
-
-                if len(downbeats_in_section) >= 2:
-                    # Vary effect every 2-4 bars within the section
-                    bars_per_variant = 2 if is_high else 4
-                    variant_idx = 0
-                    for j in range(len(downbeats_in_section) - 1):
-                        if j > 0 and j % bars_per_variant == 0:
-                            variant_idx += 1
-
-                        motion_key = available[variant_idx % len(available)]
-                        motion_settings = _get_settings(motion_key)
-
-                        start_ms = int(downbeats_in_section[j] * 1000)
-                        end_ms = int(downbeats_in_section[j + 1] * 1000)
-                        motion_pal_idx = (pal_idx + j // 2) % len(palette_pool)
-                        for name in model_names:
-                            all_effects.append(EffectPlacement(
-                                model_name=name, layer=1,
-                                effect_name=_effect_name_from_key(motion_key),
-                                start_time_ms=start_ms, end_time_ms=end_ms,
-                                settings=motion_settings,
-                                palette=palette_pool[motion_pal_idx],
-                            ))
-                    last_motion_key_per_group[group_seed] = motion_key
-                else:
-                    motion_key = group_rng.choice(available)
-                    motion_settings = _get_settings(motion_key)
-                    for name in model_names:
-                        all_effects.append(EffectPlacement(
-                            model_name=name, layer=1,
-                            effect_name=_effect_name_from_key(motion_key),
-                            start_time_ms=section.start_time_ms,
-                            end_time_ms=section.end_time_ms,
-                            settings=motion_settings, palette=palette,
-                        ))
-                    last_motion_key_per_group[group_seed] = motion_key
-
-            # --- LAYER 2: Accent hits (stem-reactive timing) ---
-            if use_accents:
-                # Choose accent effects based on dominant stem
-                stem_accent = STEM_ACCENT_OVERRIDES.get(dom_stem, ["Shockwave_hit"])
-                if not stem_accent:
-                    # Vocals dominant → skip accents to not compete with faces
-                    continue
-
-                accent_choices = stem_accent
-                accent_key = group_rng.choice(accent_choices)
-                accent_settings = _get_settings(accent_key)
-
-                # Use drum onsets for timing when available, fall back to downbeats
-                if stem_data.available and "drums" in stem_data.stems:
-                    accent_times = stem_data.get_onsets_in_range(
-                        "drums", section.start_time, section.end_time
-                    )
-                    # Thin out to every 2nd or 4th hit to avoid over-accenting
-                    accent_interval = 2 if section.energy_level > 0.85 else 4
-                    accent_times = accent_times[::accent_interval]
-                else:
-                    accent_interval = 2 if section.energy_level > 0.85 else 4
-                    accent_times = [db for i, db in enumerate(downbeats_in_section) if i % accent_interval == 0]
-
-                beat_dur_ms = int(60000 / max(analysis.beats.tempo, 60))
-                accent_dur = min(beat_dur_ms, 500)
-
-                for j, t in enumerate(accent_times):
-                    t_ms = int(t * 1000)
-                    accent_pal_idx = (pal_idx + j) % len(palette_pool)
-                    for name in model_names:
-                        all_effects.append(EffectPlacement(
-                            model_name=name, layer=2,
-                            effect_name=_effect_name_from_key(accent_key),
-                            start_time_ms=t_ms,
-                            end_time_ms=t_ms + accent_dur,
-                            settings=accent_settings,
-                            palette=palette_pool[accent_pal_idx],
-                        ))
-
-    # Process grouped models — all members get identical effects
-    for group_name, members in groups.items():
-        cat = group_categories[group_name]
-        member_names = [m.name for m in members]
-        generate_for_models(member_names, cat, group_name)
-
-    # Process ungrouped models individually
-    for model in ungrouped:
-        generate_for_models([model.name], model.model_category, model.name)
-
-    # --- Instrument timing tracks from stem onsets ---
-    timing_tracks: list[TimingTrack] = []
-
-    if analysis.stem_analysis.available:
-        stem_track_map = {
-            "drums": "Drums",
-            "bass": "Bass",
-            "other": "Instruments",
-        }
-        beat_dur_ms = int(60000 / max(analysis.beats.tempo, 60))
-        onset_label_dur = min(beat_dur_ms // 2, 200)  # label duration for onset markers
-
-        for stem_name, track_name in stem_track_map.items():
-            if stem_name not in analysis.stem_analysis.stems:
-                continue
-            stem = analysis.stem_analysis.stems[stem_name]
-            if not stem.onset_times:
-                continue
-
-            labels = []
-            for t in stem.onset_times:
-                t_ms = int(t * 1000)
-                labels.append(TimingTrackLabel(
-                    label="x",
-                    start_time_ms=t_ms,
-                    end_time_ms=t_ms + onset_label_dur,
-                ))
-
-            timing_tracks.append(TimingTrack(
-                name=track_name,
-                labels=[labels],
-            ))
-            logger.info(f"Added '{track_name}' timing track: {len(labels)} onsets")
-
-    # --- Singing Faces: multi-track extraction + vocal assignment ---
-    has_lyrics = False
-    resolved_assignments: dict[str, str] = {}
-
-    if singing_models:
-        # Extract all available vocal tracks
-        vocal_tracks = _try_extract_vocal_tracks(mp3_path)
-
-        if vocal_tracks:
-            has_lyrics = True
-
-            # If no vocal_assignments provided, return discovery info for the agent
-            if vocal_assignments is None:
-                singing_info = []
-                for mname, fdef in singing_models.items():
-                    singing_info.append({
-                        "model_name": mname,
-                        "face_definition": fdef,
-                    })
-                track_info = []
-                for t in vocal_tracks:
-                    track_info.append({
-                        "track_name": t.track_name,
-                        "source": t.source,
-                        "word_count": len(t.words),
-                    })
-                return {
-                    "needs_vocal_assignment": True,
-                    "singing_models": singing_info,
-                    "vocal_tracks": track_info,
-                    "message": (
-                        "Singing face models and vocal tracks detected. "
-                        "Please assign vocal tracks to models using the vocal_assignments parameter. "
-                        "Pass a dict mapping model names to track names, "
-                        'or use {"all": "<track_name>"} to assign one track to all singing models.'
-                    ),
-                }
-
-            # Resolve "all" shorthand → expand to every singing model
-            resolved_assignments: dict[str, str] = {}
-            if "all" in vocal_assignments:
-                track_name = vocal_assignments["all"]
-                for mname in singing_models:
-                    resolved_assignments[mname] = track_name
-            else:
-                resolved_assignments = dict(vocal_assignments)
-
-            # Build a timing track name → LyricTrack lookup
-            track_lookup: dict[str, "LyricTrack"] = {t.track_name: t for t in vocal_tracks}
-
-            # Add ALL vocal timing tracks to the sequence (not just assigned ones)
-            for lyric_track in vocal_tracks:
-                word_labels = []
-                for w in lyric_track.words:
-                    word_labels.append(TimingTrackLabel(
-                        label=w.word,
-                        start_time_ms=int(w.start_time * 1000),
-                        end_time_ms=int(w.end_time * 1000),
-                    ))
-                phoneme_labels = []
-                for p in lyric_track.phonemes:
-                    phoneme_labels.append(TimingTrackLabel(
-                        label=p.phoneme,
-                        start_time_ms=p.start_time_ms,
-                        end_time_ms=p.end_time_ms,
-                    ))
-                timing_tracks.append(TimingTrack(
-                    name=lyric_track.track_name,
-                    labels=[word_labels, word_labels, phoneme_labels],
-                ))
-
-            logger.info(f"Added {len(timing_tracks)} timing tracks to sequence")
-
-            # Place effects on singing models based on assignments
-            for model_name, face_def in singing_models.items():
-                assigned_track_name = resolved_assignments.get(model_name)
-                assigned_track = track_lookup.get(assigned_track_name) if assigned_track_name else None
-
-                if not assigned_track:
-                    # No assignment for this model — use the first available track
-                    assigned_track = vocal_tracks[0]
-                    assigned_track_name = assigned_track.track_name
-                    logger.info(f"No assignment for '{model_name}', defaulting to '{assigned_track_name}'")
-
-                singing_rng = random.Random(hash(model_name + mp3_path.stem))
-
-                # Layer 0: Section-aware background that illuminates the whole model
-                for sec_idx, section in enumerate(analysis.sections):
-                    is_high = section.energy_level >= HIGH_ENERGY_THRESHOLD
-                    is_low = section.energy_level < LOW_ENERGY_THRESHOLD
-                    pal_idx = sec_idx % len(palette_pool)
-                    palette = palette_pool[pal_idx]
-
-                    if is_high:
-                        bed_key = "Twinkle_dense"
-                    elif is_low:
-                        bed_key = "ColorWash_slow"
-                    else:
-                        bed_key = singing_rng.choice(["Twinkle_ambient", "ColorWash_cycling", "Butterfly_gentle"])
-
-                    bed_settings = _get_settings(bed_key)
-                    all_effects.append(EffectPlacement(
-                        model_name=model_name, layer=0,
-                        effect_name=_effect_name_from_key(bed_key),
-                        start_time_ms=section.start_time_ms,
-                        end_time_ms=section.end_time_ms,
-                        settings=bed_settings, palette=palette,
-                    ))
-
-                # Layer 1: Faces effect with the assigned vocal track
-                faces_settings = {
-                    "E_CHECKBOX_Faces_Outline": "1",
-                    "E_CHOICE_Faces_EyeBlinkDuration": "Normal",
-                    "E_CHOICE_Faces_EyeBlinkFrequency": "Normal",
-                    "E_CHOICE_Faces_Eyes": "Auto",
-                    "E_CHOICE_Faces_FaceDefinition": face_def,
-                    "E_CHOICE_Faces_TimingTrack": assigned_track_name,
-                    "T_TEXTCTRL_Fadein": "0.5",
-                    "T_TEXTCTRL_Fadeout": "0.5",
-                }
-                all_effects.append(EffectPlacement(
-                    model_name=model_name,
-                    layer=1,
-                    effect_name="Faces",
-                    start_time_ms=0,
-                    end_time_ms=analysis.duration_ms,
-                    settings=faces_settings,
-                    palette=all_palettes[0] if all_palettes else ColorPalette(),
-                ))
-
-            logger.info(
-                f"Added singing pipeline for {list(singing_models.keys())} "
-                f"with assignments: {resolved_assignments}"
-            )
+    """Write the baseline sequence: the baseline plan plus singing faces, through write_plan."""
+    show_path = Path(show_config.show_path)
+    colors, unrecognised = palette_colors(palette_hint, theme)
+    singing = {m.name: m.face_definitions[0] for m in show_config.real_models if m.face_definitions}
+    warnings: list[str] = []
+    faces: list[dict] = []
+    lyric_tracks: list[TimingTrack] = []
+    assignments: dict[str, str] = {}
+    elements = show_config.element_names
+    stems = STEM_TRACK_NAMES if analysis.stem_analysis.available else ()
+    named_tracks = []
+    for name in ("Beats", "Bars", *stems):
+        if name in elements:
+            warnings.append(f"{name} timing track skipped: the show has a model or group with that name")
         else:
-            # Lyrics unavailable — treat singing models as regular custom models
-            for model_name in singing_models:
-                generate_for_models([model_name], "custom", model_name)
-            logger.info("Lyrics unavailable — singing models treated as regular custom models")
+            named_tracks.append(name)
 
-    # Build sequence spec
-    spec = SequenceSpec(
-        song_title=mp3_path.stem, artist="", album="",
-        media_file=str(mp3_path),
-        duration_ms=analysis.duration_ms, timing_ms=25,
-        palettes=all_palettes, effects=all_effects,
-        timing_tracks=timing_tracks,
+    if singing:
+        vocal_tracks = _try_extract_vocal_tracks(mp3_path)
+        if not vocal_tracks:
+            warnings.append(
+                f"Lyrics unavailable, so singing models {sorted(singing)} get no face effects "
+                "(install the lyrics extra for Whisper)"
+            )
+        elif vocal_assignments is None:
+            return {
+                "needs_vocal_assignment": True,
+                "singing_models": [{"model_name": m, "face_definition": f} for m, f in singing.items()],
+                "vocal_tracks": [
+                    {"track_name": t.track_name, "source": t.source, "word_count": len(t.words)}
+                    for t in vocal_tracks
+                ],
+                "message": (
+                    "Singing face models and vocal tracks detected. "
+                    "Please assign vocal tracks to models using the vocal_assignments parameter. "
+                    "Pass a dict mapping model names to track names, "
+                    'or use {"all": "<track_name>"} to assign one track to all singing models.'
+                ),
+            }
+        else:
+            vocal_tracks, by_name = _renamed_lyric_tracks(vocal_tracks, elements | set(named_tracks), warnings)
+            warnings.extend(
+                f"vocal_assignments key {key!r} isn't a singing model"
+                for key in vocal_assignments if key != "all" and key not in singing
+            )
+            for model, face_definition in singing.items():
+                requested = vocal_assignments.get("all", vocal_assignments.get(model))
+                track = by_name.get(requested, vocal_tracks[0])
+                if requested is not None and requested not in by_name:
+                    unknown = f"vocal_assignments names unknown track {requested!r}; using {track.track_name!r}"
+                    if unknown not in warnings:
+                        warnings.append(unknown)
+                assignments[model] = track.track_name
+                faces.extend(_face_placements(analysis, model, face_definition, track.track_name, colors))
+            song_end = last_frame_ms(analysis.duration_ms)
+            lyric_tracks = [_lyric_timing_track(t, song_end) for t in vocal_tracks]
+
+    cast = _baseline_cast(show_config, frozenset(singing) if faces else frozenset(), frozenset(singing))
+    if cast.props_take_turns:
+        warnings.append(
+            "No usable feature groups (none, or all hold singing models); props take turns instead (see get_show_layout / xlights-mcp.json tiers)"
+        )
+    if cast.wash is None:
+        warnings.append("No wash group, so intro/outro/breakdown sections stay dark")
+    plan = _baseline_placements(analysis, cast, colors) + faces
+    if not plan:
+        return {
+            "error": (
+                "Nothing to light: the show has no usable groups or props for the baseline. "
+                "Check get_show_layout, and set group tiers in the show's xlights-mcp.json."
+            ),
+            "warnings": warnings,
+        }
+    report = write_plan(
+        plan, analysis, mp3_path, show_path,
+        name=_free_sequence_name(show_path, mp3_path.stem),
+        timing_tracks=named_tracks,
+        extra_tracks=lyric_tracks,
+        show=show_config,
     )
-
-    # Write (never overwrite existing)
-    base_name = mp3_path.stem
-    output_path = Path(show_config.show_path) / f"{base_name}.xsq"
-    if output_path.exists():
-        counter = 1
-        while output_path.exists():
-            output_path = Path(show_config.show_path) / f"{base_name} (generated {counter}).xsq"
-            counter += 1
-
-    write_xsq(spec, show_config, output_path)
-
-    layers_used = set(e.layer for e in all_effects)
+    if not report["written"]:
+        return {
+            "error": "The baseline plan failed validation.",
+            "errors": report["errors"],
+            "warnings": warnings + report["warnings"],
+        }
 
     return {
         "success": True,
-        "output_path": str(output_path),
+        "output_path": report["path"],
         "song": mp3_path.stem,
         "duration": f"{analysis.duration_seconds:.1f}s",
         "tempo": f"{analysis.beats.tempo:.0f} BPM",
         "sections": len(analysis.sections),
-        "models_with_effects": len(models),
-        "total_effects": len(all_effects),
-        "layers_used": len(layers_used),
-        "unique_palettes": len(all_palettes),
-        "model_groups": len(groups),
-        "has_lyrics": has_lyrics,
-        "timing_tracks": [t.name for t in timing_tracks],
-        "singing_models": list(singing_models.keys()) if has_lyrics else [],
-        "vocal_assignments": resolved_assignments if has_lyrics and singing_models else {},
-        "message": f"Sequence created: {output_path.name}. Open in xLights to preview and render.",
+        "elements": report["elements"],
+        "total_effects": report["effects"],
+        "layers_used": report["max_layer"] + 1 if report["effects"] else 0,
+        "palette": colors,
+        "palette_unrecognised": unrecognised,
+        "timing_tracks": report["timing_tracks"],
+        "has_lyrics": bool(faces),
+        "singing_models": sorted(singing) if faces else [],
+        "vocal_assignments": assignments,
+        "warnings": warnings + report["warnings"],
+        "message": (
+            f"Sequence created: {Path(report['path']).name}. This is a simple baseline; for a "
+            "hand-made-style sequence use the sequence_song prompt with write_sequence."
+        ),
     }
 
 
@@ -945,66 +526,128 @@ def _generate_guided_preview(analysis: SongAnalysis, show_config: ShowConfig) ->
 # ---------------------------------------------------------------------------
 
 
-def _get_settings(variant_key: str) -> dict[str, str]:
-    """Get effect settings for a named variant."""
-    variants = EFFECT_VARIANTS.get(variant_key, [{}])
-    return variants[0].copy() if variants else {}
+def _height_order(row: dict) -> tuple:
+    y_range = row["y_range"]
+    return (y_range[0], y_range[1], row["name"]) if y_range else (float("inf"), float("inf"), row["name"])
 
 
-def _effect_name_from_key(variant_key: str) -> str:
-    """Extract the xLights effect name from a variant key.
+def _group_categories(show: ShowConfig) -> dict[str, str]:
+    by_name = {m.name: m for m in show.models}
+    categories = {}
+    for group in show.model_groups:
+        cats = [by_name[n].model_category for n in group.leaf_models if n in by_name]
+        categories[group.name] = Counter(cats).most_common(1)[0][0] if cats else "other"
+    return categories
 
-    e.g. 'Chase_left' → 'SingleStrand', 'Shockwave_hit' → 'Shockwave'
-    """
-    key_to_effect = {
-        "Shockwave_hit": "Shockwave",
-        "Chase_left": "SingleStrand",
-        "Chase_right": "SingleStrand",
-        "Chase_from_middle": "SingleStrand",
-        "Chase_bounce": "SingleStrand",
-        "Morph_quick": "Morph",
-        "Twinkle_ambient": "Twinkle",
-        "Twinkle_dense": "Twinkle",
-        "ColorWash_slow": "Color Wash",
-        "ColorWash_fast": "Color Wash",
-        "ColorWash_cycling": "Color Wash",
-        "Plasma_slow": "Plasma",
-        "Plasma_fast": "Plasma",
-        "Spirals_slow": "Spirals",
-        "Spirals_fast": "Spirals",
-        "Spirals_reverse": "Spirals",
-        "Meteors_explode": "Meteors",
-        "Meteors_rain": "Meteors",
-        "Pinwheel_sweep": "Pinwheel",
-        "Butterfly_gentle": "Butterfly",
-        "Warp_mirror": "Warp",
-        "Warp_wavy": "Warp",
-        "Marquee_default": "Marquee",
-        "On_solid": "On",
+
+def _section_span(section: SongSection, song_end: int) -> tuple[int, int] | None:
+    """The section's frame-rounded (start, end), clipped to the song; None when nothing is left."""
+    start, end = to_frame(section.start_time_ms), min(to_frame(section.end_time_ms), song_end)
+    return (start, end) if end > start else None
+
+
+def _placement(element: str, layer: int, key: str, start_ms: int, end_ms: int, palette: dict) -> dict:
+    effect, settings = EFFECT_PRESETS[key]
+    return {
+        "element": element, "layer": layer, "effect": effect,
+        "start_ms": start_ms, "end_ms": end_ms, "settings": dict(settings), "palette": palette,
     }
-    return key_to_effect.get(variant_key, variant_key.split("_")[0])
 
 
-def _precompute_section_beats(analysis: SongAnalysis) -> dict[int, list[float]]:
-    """Pre-compute which beats fall in each section."""
-    result: dict[int, list[float]] = {}
-    for i, section in enumerate(analysis.sections):
-        result[i] = [
-            b for b in analysis.beats.beat_times
-            if section.start_time <= b < section.end_time
-        ]
-    return result
+class _Cast(NamedTuple):
+    wash: dict | None
+    features: list[dict]
+    props_take_turns: bool
+    accent_pool: list[str]
+    leaves: dict[str, set[str]]
+    categories: dict[str, str]
 
 
-def _precompute_section_downbeats(analysis: SongAnalysis) -> dict[int, list[float]]:
-    """Pre-compute which downbeats fall in each section."""
-    result: dict[int, list[float]] = {}
-    for i, section in enumerate(analysis.sections):
-        result[i] = [
-            b for b in analysis.beats.downbeat_times
-            if section.start_time <= b < section.end_time
-        ]
-    return result
+def _baseline_cast(show: ShowConfig, exclude: frozenset[str], accent_exclude: frozenset[str]) -> _Cast:
+    """Who lights in the baseline: the wash group, the feature rows by height, the accent props.
+
+    Without a usable feature group, the real models take turns instead, as one-prop rows.
+    """
+    layout = build_show_layout(show)
+    leaves = {g.name: set(g.leaf_models) for g in show.model_groups}
+    categories = _group_categories(show)
+    usable = [row for row in layout["groups"] if not leaves[row["name"]] & exclude]
+    wash = max((r for r in usable if r["tier"] == "wash"), key=lambda r: r["prop_count"], default=None)
+    features = [r for r in usable if r["tier"] == "feature"]
+    props_take_turns = not features
+    if props_take_turns:
+        props = [m for m in show.real_models if m.name not in exclude | accent_exclude]
+        y = {m.name: m.world_pos_y for m in props}
+        features = [{"name": m.name, "y_range": None if y[m.name] is None else (y[m.name], y[m.name])} for m in props]
+        leaves |= {m.name: {m.name} for m in props}
+        categories |= {m.name: m.model_category for m in props}
+    accent_pool = list(dict.fromkeys(
+        prop for row in layout["groups"] if row["tier"] == "feature"
+        for prop in row["accent_props"] if prop not in exclude and prop not in accent_exclude
+    ))
+    return _Cast(wash, sorted(features, key=_height_order), props_take_turns, accent_pool, leaves, categories)
+
+
+def build_baseline_plan(
+    analysis: SongAnalysis,
+    show: ShowConfig,
+    colors: list[str],
+    exclude: frozenset[str] = frozenset(),
+    *,
+    accent_exclude: frozenset[str] = frozenset(),
+) -> list[dict]:
+    """Plan placements for the baseline sequence.
+
+    Quiet sections (intro, outro, breakdown) get the largest wash group dimmed. Other sections
+    light one half of the feature groups (by height), alternating; without feature groups the
+    show's props take turns the same way. Chorus, drop and instrumental sections add a short
+    "On" on each downbeat, cycling through accent props that aren't inside the lit feature
+    groups. Groups holding a model in `exclude` are left out, and so are those models as
+    accents and props; models in `accent_exclude` are only left out as accents and props.
+    """
+    return _baseline_placements(analysis, _baseline_cast(show, exclude, accent_exclude), colors)
+
+
+def _baseline_placements(analysis: SongAnalysis, cast: _Cast, colors: list[str]) -> list[dict]:
+    split = -(-len(cast.features) // 2)
+    halves = [cast.features[:split], cast.features[split:]]
+    palette = {"colors": colors}
+    song_end = last_frame_ms(analysis.duration_ms)
+
+    plan: list[dict] = []
+    feature_turn = accent_turn = 0
+    for index, section in enumerate(analysis.sections):
+        span = _section_span(section, song_end)
+        if span is None:
+            continue
+        start, end = span
+        role = SECTION_TYPE_CONFIG.get(section.label, "features")
+        if role == "wash":
+            if cast.wash:
+                plan.append(_placement(
+                    cast.wash["name"], 0, "ColorWash_slow", start, end,
+                    {"colors": colors, "brightness": WASH_BRIGHTNESS},
+                ))
+            continue
+
+        lit = halves[feature_turn % 2] or halves[0]
+        feature_turn += 1
+        table = MOTION_EFFECTS if section.energy_level >= HIGH_ENERGY_THRESHOLD else BED_EFFECTS
+        for turn, row in enumerate(lit, start=index):
+            choices = table.get(cast.categories[row["name"]], table["other"])
+            plan.append(_placement(row["name"], 0, choices[turn % len(choices)], start, end, palette))
+
+        if role == "accents":
+            lit_props = set().union(*(cast.leaves[row["name"]] for row in lit))
+            pool = [p for p in cast.accent_pool if p not in lit_props] or cast.accent_pool
+            for downbeat in analysis.beats.downbeat_times:
+                if pool and section.start_time <= downbeat < section.end_time:
+                    at = to_frame(downbeat * 1000)
+                    if at >= song_end:
+                        continue
+                    plan.append(_placement(pool[accent_turn % len(pool)], 1, "On_solid", at, at + ACCENT_MS, palette))
+                    accent_turn += 1
+    return plan
 
 
 def _try_extract_lyrics(mp3_path: Path):

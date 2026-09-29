@@ -194,7 +194,7 @@ def _load_groups(root: ET.Element, models: list[LightModel]) -> tuple[list[Model
                 parents[member].add(g.name)
             elif member in all_model_names:
                 continue
-            elif _is_submodel_ref(member, all_model_names):
+            elif is_submodel_ref(member, all_model_names):
                 g.submodel_count += 1
             else:
                 warnings.append(f"Group '{g.name}' lists unknown member '{member}'")
@@ -209,7 +209,7 @@ def _load_groups(root: ET.Element, models: list[LightModel]) -> tuple[list[Model
     return list(groups.values()), warnings
 
 
-def _is_submodel_ref(member: str, all_model_names: set[str]) -> bool:
+def is_submodel_ref(member: str, all_model_names: set[str]) -> bool:
     """True when `member` looks like "Model/Sub" for a known model."""
     return "/" in member and member.split("/", 1)[0] in all_model_names
 

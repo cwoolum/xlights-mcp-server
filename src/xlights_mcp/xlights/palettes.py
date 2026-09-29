@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel, Field
 
 
@@ -12,6 +14,7 @@ class ColorPalette(BaseModel):
     active_colors: list[int] = Field(default_factory=list)  # which palette slots are active
     sparkle_frequency: int = 0
     sparkle_color: str = ""
+    brightness: int = 100
 
     def to_xlights_string(self) -> str:
         """Serialize to the xLights palette format string."""
@@ -27,6 +30,9 @@ class ColorPalette(BaseModel):
         for idx in self.active_colors:
             parts.append(f"C_CHECKBOX_Palette{idx}=1")
 
+        if self.brightness != 100:
+            parts.append(f"C_SLIDER_Brightness={self.brightness}")
+
         # Sparkle
         if self.sparkle_frequency > 0:
             parts.append(f"C_SLIDER_SparkleFrequency={self.sparkle_frequency}")
@@ -34,6 +40,9 @@ class ColorPalette(BaseModel):
             parts.append(f"C_COLOURPICKERCTRL_SparklesColour={self.sparkle_color}")
 
         return ",".join(parts)
+
+
+DEFAULT_PALETTE = ColorPalette(colors=["#FFFFFF"], active_colors=[1])
 
 
 # Pre-defined theme palettes
@@ -110,3 +119,38 @@ def get_theme_palettes(theme: str | None) -> dict[str, ColorPalette]:
     elif theme and "christmas" in theme.lower():
         return {**CHRISTMAS_PALETTES, **GENERIC_PALETTES}
     return {**CHRISTMAS_PALETTES, **GENERIC_PALETTES}
+
+
+COLOR_NAMES: dict[str, str] = {
+    "red": "#FF0000", "green": "#00FF00", "blue": "#0000FF", "white": "#FFFFFF",
+    "warm white": "#FFE4B5", "yellow": "#FFFF00", "orange": "#FF6600", "gold": "#FFD700",
+    "purple": "#800080", "pink": "#FF69B4", "magenta": "#FF00FF", "cyan": "#00FFFF", "ice": "#A5F2F3",
+}
+MAX_PALETTE_COLORS = 8
+_HEX_COLOR = re.compile(r"#[0-9a-f]{6}")
+_HINT_SEPARATORS = re.compile(r",|\band\b")
+
+
+def parse_palette_hint(hint: str) -> tuple[list[str], list[str]]:
+    """Colours named in a hint such as "red, green and warm white" or "#FF6600 and purple", plus unrecognised words."""
+    colors: list[str] = []
+    unknown: list[str] = []
+    for phrase in _HINT_SEPARATORS.split(hint.lower()):
+        phrase = " ".join(phrase.split())
+        if not phrase:
+            continue
+        color = phrase.upper() if _HEX_COLOR.fullmatch(phrase) else COLOR_NAMES.get(phrase)
+        if color is None:
+            unknown.append(phrase)
+        elif color not in colors:
+            colors.append(color)
+    return colors[:MAX_PALETTE_COLORS], unknown
+
+
+def palette_colors(hint: str | None, theme: str | None) -> tuple[list[str], list[str]]:
+    """The hint's colours, or the theme's first palette's active colours when the hint names none."""
+    colors, unknown = parse_palette_hint(hint) if hint else ([], [])
+    if not colors:
+        palette = next(iter(get_theme_palettes(theme).values()))
+        colors = [palette.colors[i - 1] for i in palette.active_colors]
+    return colors, unknown

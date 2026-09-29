@@ -20,12 +20,12 @@ Give it an `.mp3`, and it will analyze the beats, song structure, and energy —
 ### 💡 Sequence Generation
 - **Generates valid `.xsq` files** that open directly in xLights — no xLights GUI required during generation
 - **Reads your actual show config** — knows your models, controllers, channel counts, and model types
-- **Intelligent effect selection** — picks effects based on model type (arches get chases, trees get spirals, etc.) and musical features (beats → shockwaves, choruses → high energy, verses → gentle)
-- **Theme-aware palettes** — Christmas (red/green/gold) and Halloween (orange/purple) color schemes
-- **Three generation modes:**
-  - **Automatic** — AI picks everything, you review in xLights
+- **Baseline sequences** — works from your xLights groups: a dimmed wash in quiet sections, feature groups taking turns by height, and short accent hits on downbeats in choruses and drops
+- **Hand-made-style sequences** — the `sequence_song` prompt walks your AI through planning a sequence section by section and writing it with `write_sequence`
+- **Palettes** — colour names or `#RRGGBB` via `palette_hint`, or a theme's colours (Christmas, Halloween, …)
+- **Generation modes:**
+  - **Automatic** — writes the baseline, you review in xLights
   - **Guided** — AI shows song structure, you choose effects per section
-  - **Template** — define reusable effect recipes, AI places them on beat
 - **Never overwrites** — existing sequences are safe; generated files get a `(generated N)` suffix
 
 ### 📦 Sequence Import & Remapping
@@ -235,9 +235,9 @@ Once connected, interact with the server through natural language in your AI too
 ```
 
 When generating, you'll be asked to choose a mode:
-- **auto** — fully automatic, AI picks effects and colors
+- **auto** — writes a simple baseline sequence
 - **guided** — see the song structure first, then choose effects per section
-- **template** — apply saved effect recipes to detected sections
+- **template** — not implemented yet
 
 ### Import a community sequence
 
@@ -275,8 +275,9 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 | `list_models` | List all light models with type, controller, and category info ("Dont Map" placeholders hidden unless `include_placeholders`) |
 | `get_show_layout` | Model groups with a suggested tier (wash / feature / skip), hierarchy, height range and accent props; override tiers in `xlights-mcp.json` in the show folder (an override can change which groups count as sub-parts of a feature) |
 | `list_controllers` | List controllers with IPs, protocols, and channel counts |
-| `list_sequences` | List all `.xsq` sequence files in the active show |
+| `list_sequences` | List all `.xsq` sequence files in the active show, each with `generated` (written by this server, or hand-made) and `modified` |
 | `inspect_sequence` | Show song info, duration, effects, and models used in a sequence |
+| `profile_sequence` | Style profile of a sequence against the show layout: elements lit at once, dark share, parents lit with their children, layers and effects per element — use a hand-made sequence as the target style |
 | `list_effects` | List all available xLights effects with descriptions |
 
 ### Audio Analysis
@@ -291,7 +292,8 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 ### Sequence Generation
 | Tool | Description |
 |------|-------------|
-| `create_sequence` | Generate a `.xsq` file from an `.mp3` with effects on all models |
+| `create_sequence` | Generate a baseline `.xsq` from an `.mp3`: wash in quiet sections, feature groups taking turns, accents on downbeats (use the `sequence_song` prompt for hand-made-style sequences) |
+| `write_sequence` | Validate an effect plan (element, layer 0–2, effect, times, settings, palette) against the show and song, then write it as an `.xsq`, with optional Beats/Bars/stem timing tracks; `validate_only` returns the report without writing |
 | `preview_plan` | Preview the generation plan without writing a file |
 
 ### Sequence Import & Remapping
@@ -308,34 +310,30 @@ The importer supports both standalone `.xsq` files and `.zip` packages (which in
 | `fpp_start_playlist` | Start a playlist (with optional repeat) |
 | `fpp_stop` | Stop current playback |
 
+### Prompts
+| Prompt | Description |
+|--------|-------------|
+| `sequence_song` | Playbook for a hand-made-style sequence: analyse the song, read the show layout, profile a hand-made reference sequence (the most recent one by default), plan section by section, then validate and write with `write_sequence`. Includes the show folder's `.claude/CLAUDE.md` when present |
+
 ---
 
 ## How It Works
 
 ### Effect Selection Logic
 
-The server maps **model types** to appropriate effects:
+`create_sequence` (auto mode) writes a small baseline from the show's xLights groups, tiered into wash, feature and skip groups:
 
-| Model Type | Best Effects |
-|------------|-------------|
-| Arches | SingleStrand, Chase, ColorWash, Morph |
-| Tree | Spirals, Pinwheel, Meteors, Circles |
-| Single Line | Chase, Morph, SingleStrand, Shimmer |
-| Poly Line | Chase, SingleStrand, Twinkle, Morph |
-| Window Frame | Marquee, ColorWash, On, Curtain |
-| Custom shapes | Shockwave, Circles, Plasma, Twinkle, Warp |
+| Section | What lights |
+|---------|-------------|
+| Intro, outro, breakdown | The largest wash group, dimmed Color Wash |
+| Verse, bridge, build, transition | Half of the feature groups (split by height, alternating each section) |
+| Chorus, drop, instrumental | The same, plus a short `On` on an accent prop at each downbeat, skipping props inside the lit groups |
 
-And maps **musical features** to effect choices:
+A show without feature groups lets its props take turns the same way instead; without a wash group, the quiet sections stay dark. Both are reported as warnings, and a show with nothing to light is an error.
 
-| Musical Feature | Effects |
-|----------------|---------|
-| Strong beats | Shockwave, Morph, Strobe |
-| Rhythmic passages | SingleStrand, Chase, Bars, Marquee |
-| High energy (chorus) | Chase, Meteors, SingleStrand |
-| Low energy (verse) | Twinkle, Shimmer, ColorWash, Snowflakes |
-| Sustained notes | Plasma, Pinwheel, Spirals, Galaxy |
-| Transitions | Warp, Curtain, Morph |
-| Intro/Outro | Curtain, ColorWash, Twinkle |
+Feature-group effects follow the group's majority model type (arches get chases, trees get spirals, …): gentle effects below 0.65 energy, motion effects above. Singing-face models get a background plus a `Faces` effect driven by the assigned lyric track. While faces are sequenced, groups containing a singing model are left out so nothing lights over the face; singing models are never used as accents. Beats and Bars timing tracks are added, plus Drums, Bass and Instruments when stems are available; a track named like a model or group is skipped, and a clashing lyric track is renamed. For anything richer, use the `sequence_song` prompt, which plans a hand-made-style sequence and writes it with `write_sequence`.
+
+`create_sequence` returns `output_path`, `elements`, `total_effects`, `layers_used`, `palette`, `palette_unrecognised`, `timing_tracks`, `warnings`, `has_lyrics`, `singing_models` and `vocal_assignments`.
 
 ### File Format
 
@@ -367,11 +365,15 @@ xlights-mcp-server/
 │   │   ├── show.py            # Show folder parser (networks + models XML)
 │   │   ├── xsq_reader.py     # Parse existing .xsq sequences
 │   │   ├── xsq_writer.py     # Generate .xsq XML files
+│   │   ├── profile.py         # Style profile of a hand-made sequence
 │   │   ├── effects.py         # Effect library & model/music mappings
 │   │   ├── palettes.py        # Color palette definitions & themes
 │   │   └── models.py          # Data models (Controller, LightModel, etc.)
+│   ├── prompts/
+│   │   ├── __init__.py        # Renders the sequence_song prompt
+│   │   └── sequence_song.md   # Playbook template
 │   ├── sequencer/
-│   │   └── engine.py          # Sequence generation engine (auto/guided/template)
+│   │   └── engine.py          # create_sequence: the baseline plan, singing faces, guided preview
 │   └── fpp/
 │       ├── client.py          # FPP REST API client
 │       ├── upload.py          # Sequence upload to FPP

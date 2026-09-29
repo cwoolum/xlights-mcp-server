@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import tempfile
 import threading
 import time
+import xml.etree.ElementTree as ET
+from datetime import UTC, datetime
 from pathlib import Path
 
 import anyio
@@ -33,6 +36,25 @@ def get_config() -> ServerConfig:
     if _config is None:
         _config = load_config()
     return _config
+
+
+def _active_show(config: ServerConfig) -> Path | dict:
+    """The active show folder, or an action_required dict when none is usable."""
+    show_path = config.active_show_path
+    if not show_path or not show_path.exists():
+        return {
+            "error": "No active show folder configured.",
+            "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
+        }
+    return show_path
+
+
+def _show_file(show_path: Path, value: str, suffix: str = "") -> Path:
+    """`value` as a path: relative ones resolve against the show folder; `suffix` is added when missing."""
+    path = Path(value).expanduser()
+    if suffix and path.suffix.lower() != suffix:
+        path = path.with_name(path.name + suffix)
+    return path if path.is_absolute() else show_path / path
 
 
 def _resolve_show(config: ServerConfig, show_name: str | None) -> dict | Path:
@@ -193,12 +215,9 @@ def list_models(include_placeholders: bool = False) -> dict:
     from xlights_mcp.xlights.show import load_show_models
 
     config = get_config()
-    show_path = config.active_show_path
-    if not show_path or not show_path.exists():
-        return {
-            "error": "No active show folder configured.",
-            "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
-        }
+    show_path = _active_show(config)
+    if isinstance(show_path, dict):
+        return show_path
 
     models = [m for m in load_show_models(show_path) if include_placeholders or not m.is_placeholder]
     return {
@@ -228,18 +247,9 @@ def get_show_layout(show_name: str | None = None) -> dict:
     from xlights_mcp.xlights.show import load_show_config
 
     config = get_config()
-    if show_name:
-        resolved = _resolve_show(config, show_name)
-        if isinstance(resolved, dict):
-            return resolved
-        show_path = resolved
-    else:
-        show_path = config.active_show_path
-        if not show_path or not show_path.exists():
-            return {
-                "error": "No active show folder configured.",
-                "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
-            }
+    show_path = _resolve_show(config, show_name) if show_name else _active_show(config)
+    if isinstance(show_path, dict):
+        return show_path
 
     layout = build_show_layout(load_show_config(show_path))
     layout["show"] = show_name or config.active_show
@@ -255,12 +265,9 @@ def list_controllers() -> dict:
     from xlights_mcp.xlights.show import load_show_controllers
 
     config = get_config()
-    show_path = config.active_show_path
-    if not show_path or not show_path.exists():
-        return {
-            "error": "No active show folder configured.",
-            "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
-        }
+    show_path = _active_show(config)
+    if isinstance(show_path, dict):
+        return show_path
 
     controllers = load_show_controllers(show_path)
     return {
@@ -272,18 +279,29 @@ def list_controllers() -> dict:
 
 @mcp.tool()
 def list_sequences() -> dict:
-    """List all sequences (.xsq files) in the active show folder."""
+    """List all sequences (.xsq files) in the active show folder.
+
+    `generated` is true for sequences written by create_sequence/write_sequence, false for
+    hand-made ones, and null when the file can't be read. `modified` is the file's last-modified time.
+    """
+    from xlights_mcp.xlights.xsq_reader import is_generated_file
+
     config = get_config()
-    show_path = config.active_show_path
-    if not show_path or not show_path.exists():
-        return {
-            "error": "No active show folder configured.",
-            "action_required": "Ask the user for the path to their xLights show directory and call add_show_folder.",
-        }
+    show_path = _active_show(config)
+    if isinstance(show_path, dict):
+        return show_path
 
     sequences = []
-    for xsq in sorted(show_path.glob("*.xsq")):
-        sequences.append({"name": xsq.stem, "path": str(xsq)})
+    for xsq in sorted(p for p in show_path.glob("*.xsq") if p.is_file()):
+        try:
+            generated = is_generated_file(xsq)
+        except OSError:
+            generated = None
+        try:
+            modified = datetime.fromtimestamp(xsq.stat().st_mtime, tz=UTC).astimezone().isoformat(timespec="seconds")
+        except OSError:
+            modified = None
+        sequences.append({"name": xsq.stem, "path": str(xsq), "generated": generated, "modified": modified})
     return {
         "show": config.active_show,
         "sequence_count": len(sequences),
@@ -302,16 +320,55 @@ def inspect_sequence(sequence_name: str) -> dict:
     """
     from xlights_mcp.xlights.xsq_reader import read_xsq_summary
 
+    if not sequence_name.strip():
+        return {"error": "sequence name is required"}
     config = get_config()
-    show_path = config.active_show_path
-    if not show_path:
-        return {"error": "No active show configured"}
+    show_path = _active_show(config)
+    if isinstance(show_path, dict):
+        return show_path
 
-    xsq_path = show_path / f"{sequence_name}.xsq"
+    xsq_path = _show_file(show_path, sequence_name, ".xsq")
     if not xsq_path.exists():
         return {"error": f"Sequence not found: {xsq_path}"}
 
     return read_xsq_summary(xsq_path)
+
+
+@mcp.tool()
+def profile_sequence(xsq_path: str) -> dict:
+    """Style profile of a sequence, measured against the active show's layout.
+
+    Use a hand-made sequence as the target style for a new one:
+    - lit_at_once: elements lit at the same moment (median / p90 / max), sampled every 50 ms
+    - dark_share: share of the song with nothing lit ("Off" effects count as dark)
+    - parent_lit_with_contained: per group, the share of its lit time when a group or model
+      inside it is also lit (how often parents act as a base under their children)
+    - overlaps_within_layer: overlapping effects on one element layer (hand-made sequences have 0)
+    - elements: per element (the 20 busiest), its layers, effect count, median effect length,
+      share of the song lit and top effect names; other_elements summarises the rest.
+      effects includes effects on strands, nodes and submodels, and sub_effects counts those
+      (layers lists only the element's own effect layers)
+
+    Args:
+        xsq_path: The sequence file; a name or relative path resolves against the active show
+            folder, and ".xsq" is added when missing
+    """
+    from xlights_mcp.xlights.profile import profile_sequence as build_profile
+    from xlights_mcp.xlights.show import load_show_config
+
+    if not xsq_path.strip():
+        return {"error": "sequence name is required"}
+    config = get_config()
+    show_path = _active_show(config)
+    if isinstance(show_path, dict):
+        return show_path
+    path = _show_file(show_path, xsq_path, ".xsq")
+    if not path.is_file():
+        return {"error": f"Sequence not found: {path}"}
+    try:
+        return build_profile(path, load_show_config(show_path))
+    except (ET.ParseError, ValueError, OSError) as e:
+        return {"error": f"Could not read {path.name}: {e}"}
 
 
 @mcp.tool()
@@ -568,17 +625,27 @@ async def create_sequence(
     vocal_assignments: dict[str, str] | None = None,
     show_name: str | None = None,
 ) -> dict:
-    """Create an xLights sequence from a music file.
+    """Create a baseline xLights sequence from a music file.
 
-    Analyzes the audio and generates a .xsq file with effects placed on
-    your light models according to the selected generation mode.
+    "auto" writes a simple baseline: quiet sections (intro, outro, breakdown) get the
+    largest wash group dimmed; other sections light half of the feature groups at a
+    time, alternating by height; chorus, drop and instrumental sections add short hits
+    on accent props at each downbeat. Without feature groups, the show's props take
+    turns instead. It includes Beats and Bars timing tracks, plus
+    Drums, Bass and Instruments when stems are available. It never overwrites an
+    existing sequence; it picks "<song> (generated N)" instead. For a hand-made-style
+    sequence, use the sequence_song prompt and write_sequence.
 
     Args:
         mp3_path: Path to the .mp3 file
-        mode: Generation mode — "auto" (AI picks everything), "guided" (interactive),
-              or "template" (apply saved recipes)
-        palette_hint: Optional color hint (e.g., "red and green", "orange and purple")
-        theme: Optional theme hint (e.g., "christmas", "halloween", "energetic")
+        mode: Generation mode — "auto" (the baseline described above), "guided" (returns
+              the analysis for an interactive session), "template" (not implemented yet)
+        palette_hint: Optional colours: names (red, green, blue, white, warm white,
+            yellow, orange, gold, purple, pink, magenta, cyan, ice) or #RRGGBB,
+            separated by commas and/or "and". Unrecognised words are reported and
+            ignored; with no usable hint, the theme's palette is used.
+        theme: Optional theme: "christmas" or "halloween"; anything else uses the
+            Christmas palettes
         vocal_assignments: Optional mapping of model names to vocal track names.
             Use {"all": "<track_name>"} to assign one track to all singing models,
             or map individual models like {"Snowman": "Vocals", "Bulb Blue": "Full Mix Vocals"}.
@@ -613,6 +680,84 @@ async def create_sequence(
             audio_config=config.audio,
             vocal_assignments=vocal_assignments,
             progress=on_progress,
+        )
+    )
+
+
+@mcp.tool()
+async def write_sequence(
+    mp3_path: str,
+    ctx: Context,
+    plan: list[dict] | None = None,
+    plan_path: str | None = None,
+    name: str | None = None,
+    timing_tracks: list[str] | None = None,
+    overwrite: bool = False,
+    validate_only: bool = False,
+) -> dict:
+    """Validate an effect plan against the active show and the song, then write it as an .xsq.
+
+    Each placement: {"element", "layer", "effect", "start_ms", "end_ms", "settings", "palette"}.
+    - element: a model or group name (list_models / get_show_layout); submodels aren't supported.
+    - layer: 0-2 (default 0). effect: an xLights effect name (list_effects, or any effect
+      already used in this show's sequences).
+    - settings: {key: value} (values must be strings, numbers or booleans, and can't contain
+      commas) or a raw "K=V,K=V" string.
+    - palette: {"colors": ["#RRGGBB", ...] (1-8), "brightness": 0-400 (default 100),
+      "sparkles": 0-200 (default 0)}; omitted means a white palette.
+
+    Times are rounded to the 25 ms frame grid and clipped to the song end (counted under
+    "adjusted"). Any error writes nothing: overlapping placements on the same element and layer,
+    a bad layer, bad times (non-numeric, negative, empty after rounding, or starting at or after
+    the song end), an unknown element or effect, an unknown placement or palette key (e.g. a
+    misspelt "pallete"), malformed settings or palette, an unknown or duplicate timing track (a
+    timing track can't share a name with a model or group), an invalid name, or an existing file
+    without overwrite. A group lit while a group or model inside it is also lit
+    is a warning. The report lists at most 50 errors.
+
+    Args:
+        mp3_path: The song; analysed first when it isn't cached (like get_beat_map)
+        plan: The placements. Pass this or plan_path, not both.
+        plan_path: A JSON file holding the placement list; relative paths resolve against
+            the active show folder
+        name: Sequence file name without .xsq (default: the song's file name)
+        timing_tracks: Any of "Beats" (labelled with the beat's position in its bar), "Bars"
+            (numbered), "Drums", "Bass", "Instruments" (stem onsets; need stem separation).
+            Effects can reference them, e.g. E_CHOICE_VUMeter_TimingTrack=Beats.
+        overwrite: Replace an existing .xsq with the same name
+        validate_only: Run every check and return the report without writing
+    """
+    from xlights_mcp.sequencer.plan_writer import write_plan
+
+    config = get_config()
+    show_path = _active_show(config)
+    if isinstance(show_path, dict):
+        return show_path
+    path = Path(mp3_path).expanduser()
+    if not path.exists():
+        return {"error": f"File not found: {path}"}
+    if (plan is None) == (plan_path is None):
+        return {"error": "Pass exactly one of plan or plan_path."}
+    if plan_path is not None:
+        plan_file = _show_file(show_path, plan_path)
+        try:
+            plan = json.loads(plan_file.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as e:
+            return {"error": f"Could not read plan file {plan_file}: {e}"}
+        if not isinstance(plan, list):
+            return {"error": f"Plan file {plan_file} must hold a list of placements."}
+
+    analysis = await _analyze_in_thread(path, ctx)
+    return await anyio.to_thread.run_sync(
+        lambda: write_plan(
+            plan,
+            analysis,
+            path,
+            show_path,
+            name=name,
+            timing_tracks=timing_tracks or [],
+            overwrite=overwrite,
+            validate_only=validate_only,
         )
     )
 
@@ -786,6 +931,27 @@ async def remap_sequence(
         output_path=str(output_path),
         mapping_report=report,
     ).model_dump()
+
+
+@mcp.prompt()
+def sequence_song(mp3_path: str, reference_sequence: str | None = None) -> str:
+    """Plan and write a hand-made-style sequence for a song using the show's groups."""
+    from xlights_mcp.prompts import render_sequence_song
+    from xlights_mcp.xlights.xsq_reader import latest_hand_made_sequence
+
+    show_path = get_config().active_show_path
+    reference, notes = reference_sequence, None
+    if show_path and show_path.exists():
+        if not reference:
+            latest = latest_hand_made_sequence(show_path)
+            reference = latest.name if latest else None
+        notes_file = show_path / ".claude" / "CLAUDE.md"
+        if notes_file.is_file():
+            try:
+                notes = notes_file.read_text(encoding="utf-8-sig")
+            except (OSError, UnicodeDecodeError):
+                notes = None
+    return render_sequence_song(mp3_path, reference, notes)
 
 
 # ---------------------------------------------------------------------------

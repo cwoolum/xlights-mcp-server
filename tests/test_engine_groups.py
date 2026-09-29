@@ -1,4 +1,4 @@
-"""create_sequence's legacy engine groups models by feature-tier groups."""
+"""The baseline and guided preview honour the show's groups, tiers and placeholders."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
-from xlights_mcp.sequencer.engine import (
-    _detect_model_groups,
-    _generate_guided_preview,
-)
+from show_fixtures import make_analysis
+
+from xlights_mcp.audio.sections import SongSection
+from xlights_mcp.sequencer.engine import _generate_guided_preview, build_baseline_plan
 from xlights_mcp.xlights.show import load_show_config
 
 SHOW = Path(__file__).parent / "fixtures" / "show_groups"
@@ -22,16 +22,6 @@ def _analysis():
         duration_seconds=10.0,
         beats=SimpleNamespace(tempo=120.0, beat_times=[]),
     )
-
-
-def test_engine_groups_are_the_feature_tier_groups():
-    show = load_show_config(SHOW)
-
-    groups, ungrouped, _ = _detect_model_groups(show.real_models, show)
-
-    assert set(groups) == {"Roof Edges", "Door", "Pipes", "Lanterns", "Legacy Arches"}
-    assert [m.name for m in groups["Roof Edges"]] == ["Roof Left", "Roof Right", "Under Left", "Under Right"]
-    assert {m.name for m in ungrouped} == {"Tree 6ft"}
 
 
 def test_placeholders_are_not_sequenced():
@@ -55,12 +45,19 @@ def test_guided_preview_omits_placeholders():
     assert "Roof Mid - Null - Do Not Map" not in listed
 
 
-def test_engine_groups_honor_tier_overrides(tmp_path):
+def test_baseline_honors_tier_overrides(tmp_path):
     show_dir = tmp_path / "show"
     shutil.copytree(SHOW, show_dir)
     (show_dir / "xlights-mcp.json").write_text(json.dumps({"tiers": {"Pipes-Odd": "feature"}}), encoding="utf-8")
     show = load_show_config(show_dir)
+    analysis = make_analysis(
+        8.0, [], [0.0, 2.0, 4.0, 6.0],
+        sections=[
+            SongSection(label="verse", start_time=0.0, end_time=4.0),
+            SongSection(label="verse", start_time=4.0, end_time=8.0),
+        ],
+    )
 
-    groups, _, _ = _detect_model_groups(show.real_models, show)
+    elements = {p["element"] for p in build_baseline_plan(analysis, show, ["#FFFFFF"])}
 
-    assert "Pipes-Odd" in groups
+    assert "Pipes-Odd" in elements

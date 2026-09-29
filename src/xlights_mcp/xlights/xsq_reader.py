@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import logging
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from xlights_mcp.xlights.xsq_writer import HEAD_BYTES, is_generated_sequence
+
 logger = logging.getLogger(__name__)
+
+_MEDIA_TYPE = re.compile(rb"<sequenceType>\s*Media\s*</sequenceType>")
 
 
 class EffectSummary(BaseModel):
@@ -171,6 +176,35 @@ def read_xsq_effect_db(xsq_path: Path) -> list[dict]:
                 settings[key.strip()] = val.strip()
         result.append({"index": i, "raw": text[:200], "settings": settings})
     return result
+
+
+def is_generated_file(xsq_path: Path) -> bool:
+    """True when the sequence was written by this server's generator."""
+    with open(xsq_path, "rb") as f:
+        return is_generated_sequence(f.read(HEAD_BYTES))
+
+
+def _is_media_sequence(xsq_path: Path) -> bool:
+    with open(xsq_path, "rb") as f:
+        return _MEDIA_TYPE.search(f.read(HEAD_BYTES)) is not None
+
+
+def latest_hand_made_sequence(show_path: Path) -> Path | None:
+    """The newest .xsq this server didn't generate, preferring song (Media) sequences over animations."""
+    hand_made: list[tuple[float, Path]] = []
+    media: list[tuple[float, Path]] = []
+    for path in show_path.glob("*.xsq"):
+        try:
+            if not path.is_file() or is_generated_file(path):
+                continue
+            entry = (path.stat().st_mtime, path)
+            hand_made.append(entry)
+            if _is_media_sequence(path):
+                media.append(entry)
+        except OSError:
+            continue
+    latest = max(media or hand_made, default=None)
+    return latest[1] if latest else None
 
 
 def _text(parent: ET.Element, tag: str, default: str = "") -> str:

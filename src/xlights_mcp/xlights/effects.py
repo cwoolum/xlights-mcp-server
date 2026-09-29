@@ -2,7 +2,25 @@
 
 from __future__ import annotations
 
+import re
+from functools import lru_cache
+from pathlib import Path
+
 from pydantic import BaseModel, Field
+
+from xlights_mcp.xlights.xsq_writer import HEAD_BYTES, is_generated_sequence
+
+XLIGHTS_EFFECT_NAMES: frozenset[str] = frozenset({
+    "Off", "On", "Adjust", "Bars", "Butterfly", "Candle", "Circles", "Color Wash", "Curtain",
+    "DMX", "Duplicate", "Faces", "Fan", "Fill", "Fire", "Fireworks", "Galaxy", "Garlands",
+    "Glediator", "Guitar", "Kaleidoscope", "Life", "Lightning", "Lines", "Liquid", "Marquee",
+    "Meteors", "Morph", "Moving Head", "Music", "Piano", "Pictures", "Pinwheel", "Plasma",
+    "Ripple", "Servo", "Shader", "Shape", "Shimmer", "Shockwave", "SingleStrand", "Sketch",
+    "Snowflakes", "Snowstorm", "Spirals", "Spirograph", "State", "Strobe", "Tendril", "Text",
+    "Tree", "Twinkle", "Video", "VU Meter", "Warp", "Wave",
+})
+
+_EFFECT_NAME = re.compile(rb'<Effect\b[^>]*?\bname="([^"]+)"')
 
 
 class EffectDef(BaseModel):
@@ -51,13 +69,7 @@ EFFECT_LIBRARY: list[EffectDef] = [
         name="SingleStrand",
         description="Chase/runner effect along a single strand (includes chase, fireworks, etc.)",
         best_for=["arch", "single_line", "poly_line"],
-        musical_use=["rhythmic", "beat_sync", "running", "energetic"],
-    ),
-    EffectDef(
-        name="Chase",
-        description="Color chase running along the model",
-        best_for=["arch", "single_line", "poly_line"],
-        musical_use=["rhythmic", "beat_sync", "chorus", "energetic"],
+        musical_use=["rhythmic", "beat_sync", "running", "energetic", "chorus"],
     ),
     EffectDef(
         name="Circles",
@@ -102,7 +114,7 @@ EFFECT_LIBRARY: list[EffectDef] = [
         musical_use=["vocal_section", "singing_prop"],
     ),
     EffectDef(
-        name="ColorWash",
+        name="Color Wash",
         description="Smooth color gradient wash across the model",
         best_for=["all"],
         musical_use=["ambient", "verse", "gentle", "background"],
@@ -161,30 +173,30 @@ EFFECT_LIBRARY: list[EffectDef] = [
 # Musical feature → effect mapping
 MUSICAL_EFFECT_MAP = {
     "strong_beat": ["Shockwave", "Morph", "Strobe"],
-    "beat_sync": ["SingleStrand", "Chase", "Bars", "Marquee"],
+    "beat_sync": ["SingleStrand", "Bars", "Marquee"],
     "bass_drop": ["Shockwave", "Strobe", "Fire"],
-    "high_energy": ["Chase", "Meteors", "SingleStrand", "Bars"],
-    "low_energy": ["Twinkle", "Shimmer", "ColorWash", "Snowflakes"],
+    "high_energy": ["SingleStrand", "Meteors", "Bars"],
+    "low_energy": ["Twinkle", "Shimmer", "Color Wash", "Snowflakes"],
     "sustained": ["Plasma", "Pinwheel", "Spirals", "Galaxy", "Butterfly"],
     "vocal": ["Faces"],
     "transition": ["Warp", "Curtain", "Morph"],
-    "intro": ["Curtain", "ColorWash", "Plasma"],
-    "outro": ["Twinkle", "ColorWash", "Shimmer"],
-    "chorus": ["Chase", "Shockwave", "Meteors", "Pinwheel"],
-    "verse": ["Twinkle", "ColorWash", "Circles", "Butterfly"],
+    "intro": ["Curtain", "Color Wash", "Plasma"],
+    "outro": ["Twinkle", "Color Wash", "Shimmer"],
+    "chorus": ["SingleStrand", "Shockwave", "Meteors", "Pinwheel"],
+    "verse": ["Twinkle", "Color Wash", "Circles", "Butterfly"],
     "bridge": ["Plasma", "Warp", "Galaxy"],
 }
 
 
 # Model category → best effects
 MODEL_EFFECT_MAP = {
-    "arch": ["SingleStrand", "Chase", "ColorWash", "Morph", "Shimmer", "Plasma"],
+    "arch": ["SingleStrand", "Color Wash", "Morph", "Shimmer", "Plasma"],
     "tree": ["Spirals", "Pinwheel", "Meteors", "Circles", "Shockwave", "Plasma", "Galaxy"],
-    "single_line": ["Chase", "Morph", "SingleStrand", "Shimmer", "ColorWash"],
-    "poly_line": ["Chase", "SingleStrand", "Shimmer", "Twinkle", "Morph"],
-    "window": ["Marquee", "ColorWash", "On", "Curtain"],
+    "single_line": ["SingleStrand", "Morph", "Shimmer", "Color Wash"],
+    "poly_line": ["SingleStrand", "Shimmer", "Twinkle", "Morph"],
+    "window": ["Marquee", "Color Wash", "On", "Curtain"],
     "custom": ["Shockwave", "Circles", "Plasma", "Twinkle", "Warp", "Fire", "Faces"],
-    "other": ["ColorWash", "Twinkle", "On", "Shimmer"],
+    "other": ["Color Wash", "Twinkle", "On", "Shimmer"],
 }
 
 
@@ -201,3 +213,26 @@ def get_effects_for_model(model_category: str) -> list[str]:
 def get_effects_for_musical_feature(feature: str) -> list[str]:
     """Get recommended effects for a musical feature."""
     return MUSICAL_EFFECT_MAP.get(feature, [])
+
+
+@lru_cache(maxsize=512)
+def _effect_names_in(path: Path, mtime_ns: int, size: int) -> frozenset[str]:
+    with path.open("rb") as f:
+        head = f.read(HEAD_BYTES)
+        if is_generated_sequence(head):
+            return frozenset()
+        data = head + f.read()
+    return frozenset(m.decode("utf-8", "replace") for m in _EFFECT_NAME.findall(data))
+
+
+def known_effect_names(show_path: Path | None) -> frozenset[str]:
+    """XLIGHTS_EFFECT_NAMES plus every effect name used by the show folder's .xsq files."""
+    names = set(XLIGHTS_EFFECT_NAMES)
+    if show_path:
+        for xsq in show_path.glob("*.xsq"):
+            try:
+                stat = xsq.stat()
+                names |= _effect_names_in(xsq, stat.st_mtime_ns, stat.st_size)
+            except OSError:
+                continue
+    return frozenset(names)

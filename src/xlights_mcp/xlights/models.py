@@ -105,6 +105,11 @@ class ShowConfig(BaseModel):
         """Models that carry lights; layout-only placeholders are left out."""
         return [m for m in self.models if not m.is_placeholder]
 
+    @property
+    def element_names(self) -> set[str]:
+        """Every model and group name, placeholders included."""
+        return {m.name for m in self.models} | {g.name for g in self.model_groups}
+
     def get_models_by_controller(self, controller_name: str) -> list[LightModel]:
         """Get all models assigned to a specific controller."""
         return [m for m in self.models if m.controller == controller_name]
