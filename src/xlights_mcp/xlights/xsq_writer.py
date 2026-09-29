@@ -62,7 +62,7 @@ def write_xsq(
     """Generate a .xsq file from a sequence specification.
 
     Args:
-        spec: The sequence specification with effects and palettes
+        spec: The sequence specification with effects and timing tracks
         show_config: The show configuration (models, controllers)
         output_path: Where to write the .xsq file
 
