@@ -14,6 +14,7 @@ from xlights_mcp.sequencer.timing import last_frame_ms, to_frame
 from xlights_mcp.xlights.layout import contained_elements
 from xlights_mcp.xlights.models import ShowConfig
 from xlights_mcp.xlights.palettes import ColorPalette
+from xlights_mcp.xlights.show import is_submodel_ref
 from xlights_mcp.xlights.xsq_writer import EffectPlacement
 
 MAX_LAYER = 2
@@ -121,7 +122,7 @@ def _element(name, models: set[str], elements: set[str]) -> str:
         raise PlanError("element is required")
     if name in elements:
         return name
-    if "/" in name and name.split("/", 1)[0] in models:
+    if is_submodel_ref(name, models):
         raise PlanError(f"{name!r} is a submodel; submodel elements aren't supported yet, use a group")
     raise PlanError(f"unknown element {name!r}{_suggest(name, elements)}")
 
