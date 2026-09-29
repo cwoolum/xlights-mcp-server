@@ -45,3 +45,18 @@ async def test_an_unparseable_sequence_is_an_error(active_show):
     (active_show / "Broken.xsq").write_text("<xsequence>", encoding="utf-8")
 
     assert "Broken.xsq" in (await call_tool("profile_sequence", {"xsq_path": "Broken"}))["error"]
+
+
+async def test_a_directory_is_not_a_sequence(active_show):
+    (active_show / "Folder.xsq").mkdir()
+
+    assert "not found" in (await call_tool("profile_sequence", {"xsq_path": "Folder"}))["error"]
+
+
+async def test_an_unreadable_sequence_is_an_error(active_show, monkeypatch):
+    def locked(path, show):
+        raise PermissionError(f"denied: {path.name}")
+
+    monkeypatch.setattr("xlights_mcp.xlights.profile.profile_sequence", locked)
+
+    assert "denied" in (await call_tool("profile_sequence", {"xsq_path": "Human Style"}))["error"]

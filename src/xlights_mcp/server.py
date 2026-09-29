@@ -357,12 +357,12 @@ def profile_sequence(xsq_path: str) -> dict:
     if isinstance(show_path, dict):
         return show_path
     path = _show_file(show_path, xsq_path, ".xsq")
-    if not path.exists():
+    if not path.is_file():
         return {"error": f"Sequence not found: {path}"}
     try:
         return build_profile(path, load_show_config(show_path))
-    except (ET.ParseError, ValueError) as e:
-        return {"error": f"Could not parse {path.name}: {e}"}
+    except (ET.ParseError, ValueError, OSError) as e:
+        return {"error": f"Could not read {path.name}: {e}"}
 
 
 @mcp.tool()
