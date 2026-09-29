@@ -48,7 +48,7 @@ def validate_plan(
 ) -> ValidatedPlan:
     result = ValidatedPlan()
     models = {m.name for m in show.models}
-    elements = models | {g.name for g in show.model_groups}
+    elements = show.element_names
     song_end = last_frame_ms(duration_ms)
     indexed: list[tuple[int, EffectPlacement]] = []
     for i, raw in enumerate(plan):

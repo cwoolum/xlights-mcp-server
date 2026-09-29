@@ -39,7 +39,7 @@ def write_plan(
         f"timing track {track!r} appears more than once"
         for track, n in Counter(t.name for t in tracks).items() if n > 1
     ]
-    element_names = {m.name for m in show.models} | {g.name for g in show.model_groups}
+    element_names = show.element_names
     errors += [
         f"timing track {t.name!r} has the same name as a model or group in the show"
         for t in tracks if t.name in element_names
