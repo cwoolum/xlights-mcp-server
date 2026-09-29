@@ -427,3 +427,90 @@ def test_layer_cover_warnings_list_the_first_ten_groups():
 
     assert len(result.warnings) == 11
     assert result.warnings[-1] == "... and 1 more hidden layer pair"
+
+
+def _curve(points, **over) -> dict:
+    return _p(palette={"colors": ["#FFFFFF"], "brightness": points}, **over)
+
+
+def test_a_brightness_curve_becomes_palette_points_across_the_placement():
+    result = _validate(_curve([[1000, 100], [1500, 100], [1500, 300], [2000, 300]]))
+
+    assert result.errors == [] and result.warnings == []
+    palette = result.placements[0].palette
+    assert [(round(x * 200), level) for x, level in palette.brightness_curve] == [
+        (0, 100), (100, 100), (101, 300), (200, 300),
+    ]
+
+
+def test_curve_point_times_are_frame_rounded():
+    result = _validate(_curve([[1000, 100], [1512, 200], [2000, 200]], start_ms=1000, end_ms=2000))
+
+    assert result.placements[0].palette.brightness_curve[1][0] == pytest.approx(0.5, abs=0.005)
+
+
+@pytest.mark.parametrize(
+    "points",
+    [
+        [[1000, 100], "x"],
+        [[1000, 100], [1500]],
+        [[1000, 100], [1500, 100, 1]],
+        [[1000, 100], [1500, "high"]],
+        [[1000, 100], [True, 100]],
+        [[1000, 100], [float("nan"), 100]],
+    ],
+)
+def test_curve_points_must_be_pairs_of_numbers(points):
+    assert "palette.brightness points must be [t_ms, value] pairs" in _validate(_curve(points)).errors[0]
+
+
+def test_a_curve_needs_two_points():
+    assert "palette.brightness needs at least 2 points" in _validate(_curve([[1000, 100]])).errors[0]
+    assert "palette.brightness needs at least 2 points" in _validate(_curve([])).errors[0]
+
+
+@pytest.mark.parametrize("t", [900, 2100])
+def test_curve_points_outside_the_placement_are_errors(t):
+    error = _validate(_curve([[1000, 100], [t, 200]])).errors[0]
+
+    assert f"palette.brightness point {t} is outside the placement (1000-2000 ms)" in error
+
+
+def test_curve_point_times_must_not_decrease():
+    error = _validate(_curve([[1000, 100], [1600, 200], [1400, 300]])).errors[0]
+
+    assert "palette.brightness point times must not decrease" in error
+
+
+@pytest.mark.parametrize("level", [401, -1])
+def test_curve_values_are_limited_to_0_to_400(level):
+    error = _validate(_curve([[1000, 100], [2000, level]])).errors[0]
+
+    assert f"palette.brightness values must be 0-400, got {level}" in error
+
+
+def test_curve_values_may_be_floats():
+    assert _validate(_curve([[1000, 100.5], [2000, 250.25]])).errors == []
+
+
+def test_curve_snap_warnings_carry_the_placement_prefix():
+    result = _validate(_curve([[0, 100], [1000, 120], [1040, 140], [20000, 140]], start_ms=0, end_ms=20000))
+
+    assert result.errors == []
+    assert any(
+        w.startswith("placement 0 ('Door', layer 0, 0-20000 ms): brightness curve points snap to 100 ms steps")
+        for w in result.warnings
+    )
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"C_VALUECURVE_Brightness": "Active=TRUE"},
+        "C_VALUECURVE_Brightness=Active=TRUE|Values=0.000:0.2500",
+    ],
+)
+def test_a_brightness_curve_in_settings_is_rejected(settings):
+    error = _validate(_p(settings=settings)).errors[0]
+
+    assert "put brightness curves in palette.brightness, not settings" in error
