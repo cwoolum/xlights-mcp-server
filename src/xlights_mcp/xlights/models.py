@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel, Field
+
+_PLACEHOLDER_NAME = re.compile(r"d(?:on'?t|o not) map", re.IGNORECASE)
+
+
+def is_placeholder_name(name: str) -> bool:
+    """True for layout-only placeholder models ("Dont Map", "Don't Map", "Do Not Map")."""
+    return bool(_PLACEHOLDER_NAME.search(name))
 
 
 class Controller(BaseModel):
@@ -37,6 +46,11 @@ class LightModel(BaseModel):
     string_type: str = "RGB Nodes"
     submodels: list[SubModel] = Field(default_factory=list)
     face_definitions: list[str] = Field(default_factory=list)  # e.g. ["Standing Snowman Singing Face"]
+    world_pos_y: float | None = None  # height in the layout (WorldPosY)
+
+    @property
+    def is_placeholder(self) -> bool:
+        return is_placeholder_name(self.name)
 
     @property
     def model_category(self) -> str:
@@ -62,9 +76,17 @@ class ModelGroup(BaseModel):
     """A group of models that can be controlled together."""
 
     name: str
-    members: list[str] = Field(default_factory=list)
+    members: list[str] = Field(default_factory=list)  # direct members as written in the file
+    child_groups: list[str] = Field(default_factory=list)  # direct members that are groups
+    parent_groups: list[str] = Field(default_factory=list)  # groups listing this one as a member
+    leaf_models: list[str] = Field(default_factory=list)  # real models reached through nesting, sorted
+    submodel_count: int = 0
     grid_size: str = ""
     layout: str = ""
+
+    @property
+    def has_submodels(self) -> bool:
+        return self.submodel_count > 0
 
 
 class ShowConfig(BaseModel):
@@ -76,6 +98,12 @@ class ShowConfig(BaseModel):
     models: list[LightModel] = Field(default_factory=list)
     model_groups: list[ModelGroup] = Field(default_factory=list)
     total_channels: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+    @property
+    def real_models(self) -> list[LightModel]:
+        """Models that carry lights; layout-only placeholders are left out."""
+        return [m for m in self.models if not m.is_placeholder]
 
     def get_models_by_controller(self, controller_name: str) -> list[LightModel]:
         """Get all models assigned to a specific controller."""

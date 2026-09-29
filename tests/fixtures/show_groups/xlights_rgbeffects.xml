@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xrgb>
+  <models>
+    <model name="Roof Left" DisplayAs="Single Line" WorldPosY="150.0"/>
+    <model name="Roof Right" DisplayAs="Single Line" WorldPosY="150.0"/>
+    <model name="Roof Mid - Null - Do Not Map" DisplayAs="Single Line" WorldPosY="150.0"/>
+    <model name="Under Left" DisplayAs="Single Line" WorldPosY="120.0"/>
+    <model name="Under Right" DisplayAs="Single Line" WorldPosY="120.0"/>
+    <model name="Door L" DisplayAs="Single Line" WorldPosY="20.0"/>
+    <model name="Door R" DisplayAs="Single Line" WorldPosY="20.0"/>
+    <model name="Pipe 1" DisplayAs="Single Line" WorldPosY="5.0"/>
+    <model name="Pipe 2" DisplayAs="Single Line" WorldPosY="5.0"/>
+    <model name="Pipe 3" DisplayAs="Single Line" WorldPosY="5.0"/>
+    <model name="Pipe 4" DisplayAs="Single Line" WorldPosY="5.0"/>
+    <model name="Pipe 5" DisplayAs="Single Line" WorldPosY="5.0"/>
+    <model name="Pipe 6" DisplayAs="Single Line" WorldPosY="5.0"/>
+    <model name="Pipe 7" DisplayAs="Single Line" WorldPosY="5.0"/>
+    <model name="Pipe 8" DisplayAs="Single Line" WorldPosY="5.0"/>
+    <model name="Pipe 9" DisplayAs="Single Line" WorldPosY="5.0"/>
+    <model name="Pipe 10" DisplayAs="Single Line" WorldPosY="5.0"/>
+    <model name="Pipe 11" DisplayAs="Single Line" WorldPosY="5.0"/>
+    <model name="Pipe 12" DisplayAs="Single Line" WorldPosY="5.0"/>
+    <model name="Pipe 13" DisplayAs="Single Line" WorldPosY="5.0"/>
+    <model name="Pipe 14" DisplayAs="Single Line" WorldPosY="5.0"/>
+    <model name="Lantern1" DisplayAs="Custom" WorldPosY="90.0"/>
+    <model name="Lantern2" DisplayAs="Custom" WorldPosY="100.0"/>
+    <model name="Lantern3" DisplayAs="Custom" WorldPosY="110.0"/>
+    <model name="Arch 1" DisplayAs="Arches" WorldPosY="10.0"/>
+    <model name="Arch 2" DisplayAs="Arches" WorldPosY="10.0"/>
+    <model name="Tree 6ft" DisplayAs="Tree 360" WorldPosY="40.0"/>
+    <model name="Spare - Dont Map" DisplayAs="Single Line"/>
+    <modelGroup name="Legacy Arches" models="Arch 1,Arch 2"/>
+  </models>
+  <modelGroups>
+    <modelGroup name="All" models="House,Pipes,Lanterns"/>
+    <modelGroup name="House" models="Roof Edges,Door"/>
+    <modelGroup name="Everything Flat" models="Roof Left,Roof Right,Under Left,Under Right,Door L,Door R,Pipe 1,Pipe 2,Pipe 3,Pipe 4,Pipe 5,Pipe 6,Pipe 7,Pipe 8,Pipe 9,Pipe 10,Pipe 11,Pipe 12,Pipe 13,Pipe 14,Lantern1,Lantern2,Lantern3,Arch 1,Arch 2,Spare - Dont Map"/>
+    <modelGroup name="Roof Edges" models="Roof Left,Roof Right,Roof Mid - Null - Do Not Map,Under Roof"/>
+    <modelGroup name="Under Roof" models="Under Left,Under Right"/>
+    <modelGroup name="Door" models="Door L,Door R"/>
+    <modelGroup name="Pipes" models="Pipe 1,Pipe 2,Pipe 3,Pipe 4,Pipe 5,Pipe 6,Pipe 7,Pipe 8,Pipe 9,Pipe 10,Pipe 11,Pipe 12,Pipe 13,Pipe 14"/>
+    <modelGroup name="Pipes-Odd" models="Pipe 1,Pipe 3,Pipe 5,Pipe 7,Pipe 9,Pipe 11,Pipe 13"/>
+    <modelGroup name="Pipe Rows" models="Pipe 1/Top,Pipe 2/Top"/>
+    <modelGroup name="Lanterns" models="Lantern1,Lantern2,Lantern3"/>
+    <modelGroup name="Empty" models=""/>
+    <modelGroup name="PreviewONLY All" models="Roof Left,Door L"/>
+    <modelGroup name="Single" models="Lantern1"/>
+    <modelGroup name="Cycle A" models="Cycle B"/>
+    <modelGroup name="Cycle B" models="Cycle A,Door L"/>
+    <modelGroup name="Door" models="Door L"/>
+  </modelGroups>
+</xrgb>

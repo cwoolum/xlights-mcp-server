@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from typing import Literal
 
 from xlights_mcp.remapper.models import (
     FILLER_WORDS,
@@ -24,7 +25,7 @@ from xlights_mcp.remapper.models import (
     ImportedModelMeta,
     _tokenize_name,
 )
-from xlights_mcp.xlights.models import LightModel, ModelGroup
+from xlights_mcp.xlights.models import LightModel, ModelGroup, is_placeholder_name
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +61,15 @@ def build_candidates_from_user_show(
     models: list[LightModel],
     groups: list[ModelGroup],
 ) -> list[MatchCandidate]:
-    """Convert user's LightModel/ModelGroup lists into MatchCandidates."""
+    """Convert user's LightModel/ModelGroup lists into MatchCandidates.
+
+    Placeholder models (Dont Map, Do Not Map) carry no lights and are never offered.
+    """
     candidates: list[MatchCandidate] = []
 
     for m in models:
+        if m.is_placeholder:
+            continue
         candidates.append(
             MatchCandidate(
                 name=m.name,
@@ -253,6 +259,8 @@ def _match_similar_word(
         for token in imp_cand.name_tokens:
             for usr_key in user_by_token.get(token, []):
                 usr_cand = user_pool[usr_key]
+                if usr_cand.is_group != imp_cand.is_group:
+                    continue
                 shared = sorted(
                     set(imp_cand.name_tokens) & set(usr_cand.name_tokens)
                 )
@@ -610,6 +618,20 @@ def _match_pixel_count_fallback(
 # ---------------------------------------------------------------------------
 
 
+def _unmatched(
+    cand: MatchCandidate, source: Literal["imported", "user"], reason: str
+) -> UnmatchedModel:
+    return UnmatchedModel(
+        name=cand.name,
+        source=source,
+        reason=reason,
+        pixel_count=cand.pixel_count,
+        display_as=cand.display_as,
+        is_singing=cand.is_singing,
+        is_group=cand.is_group,
+    )
+
+
 def _generate_unmatched_reasons(
     imported_pool: dict[str, MatchCandidate],
     user_pool: dict[str, MatchCandidate],
@@ -630,31 +652,12 @@ def _generate_unmatched_reasons(
                 f"pixel count {cand.pixel_count} "
                 f"below {threshold:.0%} threshold with remaining candidates"
             )
-        unmatched_imported.append(
-            UnmatchedModel(
-                name=cand.name,
-                source="imported",
-                reason=reason,
-                pixel_count=cand.pixel_count,
-                display_as=cand.display_as,
-                is_singing=cand.is_singing,
-                is_group=cand.is_group,
-            )
-        )
+        unmatched_imported.append(_unmatched(cand, "imported", reason))
 
-    unmatched_user: list[UnmatchedModel] = []
-    for cand in user_pool.values():
-        unmatched_user.append(
-            UnmatchedModel(
-                name=cand.name,
-                source="user",
-                reason="No imported model matched this user model",
-                pixel_count=cand.pixel_count,
-                display_as=cand.display_as,
-                is_singing=cand.is_singing,
-                is_group=cand.is_group,
-            )
-        )
+    unmatched_user = [
+        _unmatched(cand, "user", "No imported model matched this user model")
+        for cand in user_pool.values()
+    ]
 
     return unmatched_imported, unmatched_user
 
@@ -698,11 +701,17 @@ def match_models(
         2. Run priority 1–5 on singing pool, then non-singing pool
         3. Assemble MappingReport with statistics and reasons
     """
-    # Build pools keyed by name for O(1) removal
-    imported_pool: dict[str, MatchCandidate] = {c.name: c for c in imported_candidates}
+    # Placeholder elements carry no lights; they are reported, never matched.
+    imported_placeholders: list[MatchCandidate] = []
+    imported_pool: dict[str, MatchCandidate] = {}
+    for c in imported_candidates:
+        if is_placeholder_name(c.name):
+            imported_placeholders.append(c)
+        else:
+            imported_pool[c.name] = c
     user_pool: dict[str, MatchCandidate] = {c.name: c for c in user_candidates}
 
-    total_imported = len(imported_pool)
+    total_imported = len(imported_pool) + len(imported_placeholders)
     total_user = len(user_pool)
 
     all_mappings: list[ModelMapping] = []
@@ -754,6 +763,9 @@ def match_models(
 
     unmatched_imported, unmatched_user = _generate_unmatched_reasons(
         remaining_imported, remaining_user, threshold
+    )
+    unmatched_imported.extend(
+        _unmatched(c, "imported", "placeholder (no lights)") for c in imported_placeholders
     )
 
     # --- Statistics ---

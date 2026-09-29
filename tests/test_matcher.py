@@ -98,6 +98,15 @@ class TestBuildCandidates:
         assert cands[0].source == "user"
         assert cands[1].is_group is True
 
+    def test_user_show_placeholders_are_not_candidates(self):
+        models = [
+            LightModel(name="Mega Tree", display_as="Tree", pixel_count=1000),
+            LightModel(name="Spare - Dont Map", display_as="Single Line"),
+            LightModel(name="Roof Mid - Null - Do Not Map", display_as="Single Line"),
+        ]
+        cands = build_candidates_from_user_show(models, [])
+        assert [c.name for c in cands] == ["Mega Tree"]
+
     def test_from_import_no_meta(self):
         cands = build_candidates_from_import(["A", "B"])
         assert len(cands) == 2
@@ -186,6 +195,23 @@ class TestMatchSimilarWord:
         usr = _pool([_make_candidate("Beta", "user")])
         mappings = _match_similar_word(imp, usr)
         assert len(mappings) == 0
+
+    def test_model_does_not_match_group(self):
+        """An imported model shouldn't pair with a user group by shared words."""
+        imp = _pool([_make_candidate("Pipes Main", "imported", is_group=False)])
+        usr = _pool([
+            _make_candidate("Pipe 1", "user", is_group=False),
+            _make_candidate("Pipes", "user", is_group=True),
+        ])
+        mappings = _match_similar_word(imp, usr)
+        assert len(mappings) == 0
+
+    def test_group_still_matches_group(self):
+        imp = _pool([_make_candidate("Pipes Group", "imported", is_group=True)])
+        usr = _pool([_make_candidate("Pipes", "user", is_group=True)])
+        mappings = _match_similar_word(imp, usr)
+        assert len(mappings) == 1
+        assert mappings[0].user_name == "Pipes"
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +357,31 @@ class TestApplyOverrides:
 
 
 class TestMatchModels:
+    def test_imported_placeholder_is_never_matched(self):
+        imp = [_make_candidate("Tier Mid - Dont Map", "imported", pixel_count=50)]
+        usr = [_make_candidate("Tier Mid Row 1", "user", pixel_count=50)]
+
+        report = match_models(imp, usr)
+
+        assert report.mappings == []
+        assert report.total_imported_models == 1
+        assert [(u.name, u.reason) for u in report.unmatched_imported] == [
+            ("Tier Mid - Dont Map", "placeholder (no lights)")
+        ]
+        assert [u.name for u in report.unmatched_user] == ["Tier Mid Row 1"]
+
+    def test_real_imported_models_still_match_beside_placeholders(self):
+        imp = [
+            _make_candidate("Mega Tree", "imported"),
+            _make_candidate("Spare - Do Not Map", "imported"),
+        ]
+        usr = [_make_candidate("Mega Tree", "user")]
+
+        report = match_models(imp, usr)
+
+        assert [m.imported_name for m in report.mappings] == ["Mega Tree"]
+        assert [u.name for u in report.unmatched_imported] == ["Spare - Do Not Map"]
+
     def test_basic_exact_match(self):
         imp = [_make_candidate("Mega Tree", "imported")]
         usr = [_make_candidate("Mega Tree", "user")]

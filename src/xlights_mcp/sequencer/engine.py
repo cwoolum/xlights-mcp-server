@@ -25,6 +25,7 @@ from pathlib import Path
 from xlights_mcp.audio.analyzer import ProgressCallback, SongAnalysis, StemAnalysis, full_analysis
 from xlights_mcp.audio.structure import SongSection
 from xlights_mcp.config import AudioConfig
+from xlights_mcp.xlights.layout import show_tiers
 from xlights_mcp.xlights.models import LightModel, ShowConfig
 from xlights_mcp.xlights.palettes import ColorPalette, get_theme_palettes
 from xlights_mcp.xlights.show import load_show_config
@@ -337,34 +338,39 @@ def _detect_model_groups(
     list[LightModel],              # ungrouped models
     dict[str, str],                # group_name → model_category
 ]:
-    """Auto-detect model groups, preferring xLights-defined groups.
+    """Auto-detect model groups from the show's feature-tier xLights groups.
 
-    Checks show_config.model_groups first (parsed from xlights_rgbeffects.xml).
-    Falls back to common-prefix detection if no xLights groups exist.
+    Groups are tiered by classify_groups, honoring the show's xlights-mcp.json
+    overrides; only feature-tier groups with at least two models are used.
+    Falls back to common-prefix grouping when no feature-tier group qualifies.
 
     Returns grouped models (effects applied identically to all members),
     ungrouped models (effects applied individually), and category overrides.
     """
     model_by_name: dict[str, LightModel] = {m.name: m for m in models}
 
-    # --- Strategy 1: Use xLights-defined model groups ---
+    # --- Strategy 1: xLights-defined feature-tier groups ---
     if show_config.model_groups:
+        tiers, tier_warnings = show_tiers(show_config)
+        for warning in tier_warnings:
+            logger.info(warning)
         groups: dict[str, list[LightModel]] = {}
         group_categories: dict[str, str] = {}
         grouped_names: set[str] = set()
 
         for mg in show_config.model_groups:
-            members = [model_by_name[n] for n in mg.members if n in model_by_name]
+            if tiers[mg.name][0] != "feature":
+                continue
+            members = [model_by_name[n] for n in mg.leaf_models if n in model_by_name]
             if len(members) >= 2:
                 groups[mg.name] = members
                 grouped_names.update(m.name for m in members)
-                # Derive category from majority of member model categories
                 cats = [m.model_category for m in members]
                 group_categories[mg.name] = max(set(cats), key=cats.count)
 
         if groups:
             ungrouped = [m for m in models if m.name not in grouped_names]
-            logger.info(f"Using {len(groups)} xLights-defined model groups")
+            logger.info(f"Using {len(groups)} xLights feature-tier groups")
             return groups, ungrouped, group_categories
 
     # --- Strategy 2: Automatic common-prefix grouping ---
@@ -463,7 +469,7 @@ def preview_sequence_plan(
         "tempo": f"{analysis.beats.tempo:.0f} BPM",
         "beat_count": len(analysis.beats.beat_times),
         "sections": sections_summary,
-        "models": len(show_config.models),
+        "models": len(show_config.real_models),
         "controllers": len(show_config.controllers),
     }
 
@@ -506,7 +512,8 @@ def _generate_auto(
     section_downbeats = _precompute_section_downbeats(analysis)
 
     # Detect model groups (uses xLights-defined groups, falls back to prefix detection)
-    groups, ungrouped, group_categories = _detect_model_groups(show_config.models, show_config)
+    models = show_config.real_models
+    groups, ungrouped, group_categories = _detect_model_groups(models, show_config)
     logger.info(f"Detected {len(groups)} model groups, {len(ungrouped)} ungrouped models")
     for gname, members in groups.items():
         logger.info(f"  Group '{gname}': {[m.name for m in members]}")
@@ -514,7 +521,7 @@ def _generate_auto(
     # Identify singing models (models with face definitions) — exclude from regular pipeline
     singing_models: dict[str, str] = {}  # model_name → face_definition_name
     singing_model_names: set[str] = set()
-    for m in show_config.models:
+    for m in models:
         if m.face_definitions:
             singing_models[m.name] = m.face_definitions[0]
             singing_model_names.add(m.name)
@@ -885,7 +892,7 @@ def _generate_auto(
         "duration": f"{analysis.duration_seconds:.1f}s",
         "tempo": f"{analysis.beats.tempo:.0f} BPM",
         "sections": len(analysis.sections),
-        "models_with_effects": len(show_config.models),
+        "models_with_effects": len(models),
         "total_effects": len(all_effects),
         "layers_used": len(layers_used),
         "unique_palettes": len(all_palettes),
@@ -916,7 +923,7 @@ def _generate_guided_preview(analysis: SongAnalysis, show_config: ShowConfig) ->
         })
 
     models_by_category = {}
-    for m in show_config.models:
+    for m in show_config.real_models:
         cat = m.model_category
         models_by_category.setdefault(cat, []).append(m.name)
 
